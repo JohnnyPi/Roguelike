@@ -1,4 +1,4 @@
-// src/Game.Client/Rendering/TileRenderer.cs
+ï»¿// src/Game.Client/Rendering/TileRenderer.cs
 
 using System;
 using System.Collections.Generic;
@@ -7,6 +7,7 @@ using Microsoft.Xna.Framework.Graphics;
 using Game.Core;
 using Game.Core.Tiles;
 using Game.Core.Entities;
+using Game.Core.Items;
 
 namespace Game.Client.Rendering;
 
@@ -27,7 +28,7 @@ public class TileRenderer
     {
         _spriteBatch = spriteBatch;
 
-        // Create a 1x1 white pixel texture — the foundation of all our vector drawing.
+        // Create a 1x1 white pixel texture ï¿½ the foundation of all our vector drawing.
         // We scale and tint this to draw any colored rectangle.
         _pixel = new Texture2D(graphicsDevice, 1, 1);
         _pixel.SetData(new[] { Color.White });
@@ -108,19 +109,103 @@ public class TileRenderer
                 entity.Y * TileSize - camera.Y
             );
 
-            // Enemies: red square with dark border, slightly inset
-            int inset = 4;
-            _spriteBatch.Draw(
-                _pixel,
-                new Rectangle(
-                    (int)screenPos.X + inset,
-                    (int)screenPos.Y + inset,
-                    TileSize - inset * 2,
-                    TileSize - inset * 2
-                ),
-                Color.Red
-            );
+            if (entity is WorldItem worldItem)
+            {
+                DrawWorldItem(screenPos, worldItem);
+            }
+            else if (entity is Chest chest)
+            {
+                DrawChest(screenPos, chest);
+            }
+            else
+            {
+                // Generic entity (enemies in Phase 6): red square
+                int inset = 4;
+                _spriteBatch.Draw(
+                    _pixel,
+                    new Rectangle(
+                        (int)screenPos.X + inset,
+                        (int)screenPos.Y + inset,
+                        TileSize - inset * 2,
+                        TileSize - inset * 2
+                    ),
+                    Color.Red
+                );
+            }
         }
+    }
+
+    /// <summary>
+    /// Draw a world item as a small colored diamond/square at the tile center.
+    /// Uses the item def's color.
+    /// </summary>
+    private void DrawWorldItem(Vector2 screenPos, WorldItem item)
+    {
+        var color = GetItemColor(item.ItemDef);
+        int size = 10;
+        int offset = (TileSize - size) / 2;
+
+        _spriteBatch.Draw(
+            _pixel,
+            new Rectangle(
+                (int)screenPos.X + offset,
+                (int)screenPos.Y + offset,
+                size,
+                size
+            ),
+            color
+        );
+    }
+
+    /// <summary>
+    /// Draw a chest as a colored square. Brown when closed, dark gray when open.
+    /// </summary>
+    private void DrawChest(Vector2 screenPos, Chest chest)
+    {
+        int inset = 5;
+        var color = chest.IsOpen
+            ? new Color(80, 70, 60)    // dark brown-gray = opened
+            : new Color(180, 130, 50); // golden-brown = closed
+
+        // Chest body
+        _spriteBatch.Draw(
+            _pixel,
+            new Rectangle(
+                (int)screenPos.X + inset,
+                (int)screenPos.Y + inset + 4,
+                TileSize - inset * 2,
+                TileSize - inset * 2 - 4
+            ),
+            color
+        );
+
+        // Chest lid (slightly wider, on top)
+        var lidColor = chest.IsOpen
+            ? new Color(60, 55, 45)
+            : new Color(200, 150, 60);
+        _spriteBatch.Draw(
+            _pixel,
+            new Rectangle(
+                (int)screenPos.X + inset - 1,
+                (int)screenPos.Y + inset,
+                TileSize - inset * 2 + 2,
+                5
+            ),
+            lidColor
+        );
+    }
+
+    /// <summary>
+    /// Get the display color for a world item, parsed from its ItemDef.
+    /// </summary>
+    private Color GetItemColor(ItemDef def)
+    {
+        if (_colorCache.TryGetValue(def.Id, out var cached))
+            return cached;
+
+        var color = ParseHexColor(def.Color);
+        _colorCache[def.Id] = color;
+        return color;
     }
 
     private void DrawPlayer(GameState state, Camera camera)

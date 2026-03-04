@@ -1,8 +1,11 @@
-// src/Game.Client/Input/InputHandler.cs
+﻿// src/Game.Client/Input/InputHandler.cs
+
+#nullable enable
 
 using Microsoft.Xna.Framework.Input;
 using Game.Core;
 using Game.Core.Entities;
+using Game.Core.Items;
 
 namespace Game.Client.Input;
 
@@ -16,6 +19,19 @@ public class InputHandler
 {
     private KeyboardState _previousState;
     private KeyboardState _currentState;
+
+    /// <summary>
+    /// Fired when the player interacts with a transition tile (dungeon entrance/exit).
+    /// Game1 subscribes to this and performs the actual map swap.
+    /// </summary>
+    public event System.Action<TransitionRequest>? OnMapTransition;
+
+    /// <summary>Describes which direction a map transition should go.</summary>
+    public enum TransitionRequest
+    {
+        EnterDungeon,
+        ExitDungeon
+    }
 
     /// <summary>
     /// The result of processing input for one frame.
@@ -41,7 +57,7 @@ public class InputHandler
         _previousState = _currentState;
         _currentState = Keyboard.GetState();
 
-        // Movement � WASD and arrow keys
+        // Movement � WASD and arrow keys
         if (IsNewPress(Keys.W) || IsNewPress(Keys.Up))
             return Action.MoveNorth;
         if (IsNewPress(Keys.S) || IsNewPress(Keys.Down))
@@ -114,27 +130,130 @@ public class InputHandler
 
         // Clear to move
         player.Move(dx, dy);
+
+        // Auto-pickup: collect any items at the new position
+        TryPickupItems(state);
+
         return true;
     }
 
     /// <summary>
-    /// Attempt to interact with whatever is at the player's position.
-    /// Phase 4 adds dungeon entry, Phase 5 adds chest opening.
+    /// Pick up all WorldItem entities at the player's current position.
+    /// Items are added to inventory and removed from the world.
+    /// </summary>
+    private void TryPickupItems(GameState state)
+    {
+        var player = state.Player;
+
+        for (int i = state.Entities.Count - 1; i >= 0; i--)
+        {
+            if (state.Entities[i] is WorldItem item
+                && item.IsAlive
+                && item.X == player.X
+                && item.Y == player.Y)
+            {
+                player.Inventory.Add(item.ItemDef, item.Count);
+                item.IsAlive = false;
+
+                string display = item.Count > 1
+                    ? $"{item.ItemDef.Name} x{item.Count}"
+                    : item.ItemDef.Name;
+                state.Log($"Picked up {display}.");
+            }
+        }
+    }
+
+    /// <summary>
+    /// Attempt to interact with whatever is at the player's position or adjacent.
+    /// Transition tiles: must be standing on them.
+    /// Chests: must be adjacent (1 tile away in cardinal direction).
+    /// Phase 5 adds chest opening.
     /// </summary>
     private bool TryInteract(GameState state)
     {
         // Check if standing on a special tile
         var tileId = state.ActiveMap?.GetTileId(state.Player.X, state.Player.Y);
 
-        if (tileId == "base:dungeon_entrance")
+        if (tileId == "base:dungeon_entrance" && state.Mode == GameMode.Overworld)
         {
-            // Phase 4 will handle map transitions here.
-            state.Log("You see a dungeon entrance. (Transition not yet implemented.)");
-            return false; // don't consume turn for unimplemented interaction
+            OnMapTransition?.Invoke(TransitionRequest.EnterDungeon);
+            return true;
         }
+
+        if (tileId == "base:dungeon_exit" && state.Mode == GameMode.Dungeon)
+        {
+            OnMapTransition?.Invoke(TransitionRequest.ExitDungeon);
+            return true;
+        }
+
+        // Standing on dungeon_entrance while IN the dungeon — this is the entry point, 
+        // not an exit. Let the player know.
+        if (tileId == "base:dungeon_entrance" && state.Mode == GameMode.Dungeon)
+        {
+            state.Log("This is where you entered. Find the exit deeper in the dungeon.");
+            return false;
+        }
+
+        // Check adjacent tiles for interactable entities (chests)
+        if (TryInteractWithAdjacent(state))
+            return true;
 
         state.Log("Nothing to interact with here.");
         return false;
+    }
+
+    /// <summary>
+    /// Check the four cardinal neighbors for an interactable entity.
+    /// Currently handles chests; more types can be added later.
+    /// </summary>
+    private bool TryInteractWithAdjacent(GameState state)
+    {
+        int px = state.Player.X;
+        int py = state.Player.Y;
+
+        // Check all 4 cardinal directions
+        int[] dx = { 0, 0, 1, -1 };
+        int[] dy = { -1, 1, 0, 0 };
+
+        for (int d = 0; d < 4; d++)
+        {
+            int tx = px + dx[d];
+            int ty = py + dy[d];
+
+            foreach (var entity in state.Entities)
+            {
+                if (!entity.IsAlive || entity.X != tx || entity.Y != ty)
+                    continue;
+
+                if (entity is Chest chest)
+                {
+                    return TryOpenChest(chest, state);
+                }
+            }
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// Open a chest, adding its loot to the player's inventory.
+    /// </summary>
+    private bool TryOpenChest(Chest chest, GameState state)
+    {
+        var loot = chest.Open();
+        if (loot == null)
+        {
+            state.Log("This chest is already empty.");
+            return false;
+        }
+
+        var (def, count) = loot.Value;
+        state.Player.Inventory.Add(def, count);
+
+        string display = count > 1 ? $"{def.Name} x{count}" : def.Name;
+        state.Log($"Opened chest: found {display}!");
+
+        return true; // consumes a turn
     }
 
     /// <summary>
@@ -142,6 +261,16 @@ public class InputHandler
     /// This is what makes movement turn-based instead of continuous.
     /// </summary>
     private bool IsNewPress(Keys key)
+    {
+        return _currentState.IsKeyDown(key) && _previousState.IsKeyUp(key);
+    }
+
+    /// <summary>
+    /// Public version of IsNewPress for use by Game1 (e.g., R to regenerate).
+    /// Note: only valid after GetAction() has been called this frame,
+    /// since that's where keyboard state gets updated.
+    /// </summary>
+    public bool IsNewKeyPress(Keys key)
     {
         return _currentState.IsKeyDown(key) && _previousState.IsKeyUp(key);
     }

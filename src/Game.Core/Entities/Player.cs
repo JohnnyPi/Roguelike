@@ -1,5 +1,7 @@
 // src/Game.Core/Entities/Player.cs
 
+using Game.Core.Items;
+
 namespace Game.Core.Entities;
 
 /// <summary>
@@ -14,8 +16,8 @@ public class Player : Entity
     public int Attack { get; set; } = 5;
     public int Defense { get; set; } = 2;
 
-    /// <summary>Simple inventory — list of item def IDs.</summary>
-    public List<string> Inventory { get; } = new();
+    /// <summary>Player's item inventory.</summary>
+    public Inventory Inventory { get; } = new();
 
     public bool IsDead => Hp <= 0;
 
@@ -39,9 +41,4 @@ public class Player : Entity
         Hp = Math.Min(MaxHp, Hp + amount);
     }
 
-    /// <summary>Add an item def ID to inventory.</summary>
-    public void AddItem(string itemDefId)
-    {
-        Inventory.Add(itemDefId);
-    }
 }
