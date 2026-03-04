@@ -91,4 +91,23 @@ public class GameState
     {
         Entities.RemoveAll(e => !e.IsAlive);
     }
+
+    public void TryPickupItems()
+    {
+        for (int i = Entities.Count - 1; i >= 0; i--)
+        {
+            if (Entities[i] is WorldItem item
+                && item.IsAlive
+                && item.X == Player.X
+                && item.Y == Player.Y)
+            {
+                Player.Inventory.Add(item.ItemDef, item.Count);
+                item.IsAlive = false;
+                string display = item.Count > 1
+                    ? $"{item.ItemDef.Name} x{item.Count}"
+                    : item.ItemDef.Name;
+                Log($"Picked up {display}.");
+            }
+        }
+    }
 }

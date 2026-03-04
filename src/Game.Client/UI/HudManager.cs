@@ -30,6 +30,7 @@ using Myra.Graphics2D.UI;
 using Game.Core;
 using Game.Core.Entities;
 using Game.Core.Items;
+using Game.Client.Input;
 
 #nullable enable
 
@@ -65,7 +66,7 @@ public sealed class HudManager
     // Track how many messages we've rendered so we only update on change
     private int _lastLogCount;
 
-    public HudManager()
+    public HudManager(Game.Client.Input.InputBindings bindings)
     {
         _desktop = new Desktop();
 
@@ -200,7 +201,12 @@ public sealed class HudManager
             Margin = new Thickness(0, 0, 8, 8),
             HorizontalAlignment = HorizontalAlignment.Right,
             VerticalAlignment = VerticalAlignment.Bottom,
-            Text = "WASD:Move  E:Interact  I:Inventory  R:Regen  Esc:Quit",
+            Text = InputBindings.HintLine(bindings,
+                (GameAction.MoveNorth, "Move"),
+                (GameAction.Interact, "Interact"),
+                (GameAction.ToggleInventory, "Inventory"),
+                (GameAction.RegenerateWorld, "Regen"),
+                (GameAction.Quit, "Quit")),
             TextColor = new Color(120, 120, 120)
         };
         root.Widgets.Add(_hintsLabel);

@@ -1,0 +1,42 @@
+# content/BasePack/config/controls.yml
+#
+# Key bindings for all game actions.
+# Each action maps to one or more key names (any key triggers the action).
+# Key names match MonoGame's Keys enum values (case-insensitive).
+#
+# To rebind: change the key names and restart the game.
+# Unrecognized actions or key names are ignored with a debug warning.
+#
+# Mouse actions (PathPoint, PathConfirm) are always right-click
+# and are not configurable here.
+
+moveNorth:
+  - W
+  - Up
+
+moveSouth:
+  - S
+  - Down
+
+moveEast:
+  - D
+  - Right
+
+moveWest:
+  - A
+  - Left
+
+interact:
+  - E
+
+wait:
+  - Space
+
+toggleInventory:
+  - I
+
+quit:
+  - Escape
+
+regenerateWorld:
+  - R

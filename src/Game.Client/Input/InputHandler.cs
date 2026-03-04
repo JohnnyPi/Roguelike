@@ -1,4 +1,11 @@
 ﻿// src/Game.Client/Input/InputHandler.cs
+//
+// Translates keyboard input into game actions.
+// Turn-based: each key press triggers exactly one action.
+//
+// Keys are no longer hardcoded here — all bindings come from
+// InputBindings, which is loaded from controls.yml at startup.
+// InputHandler receives the bindings via constructor injection.
 
 #nullable enable
 
@@ -9,16 +16,12 @@ using Game.Core.Items;
 
 namespace Game.Client.Input;
 
-/// <summary>
-/// Translates keyboard input into game actions.
-/// Turn-based: each key press triggers exactly one action.
-/// Uses previous/current state comparison to detect fresh presses,
-/// preventing held keys from firing every frame.
-/// </summary>
 public class InputHandler
 {
     private KeyboardState _previousState;
     private KeyboardState _currentState;
+
+    private readonly InputBindings _bindings;
 
     /// <summary>
     /// Fired when the player interacts with a transition tile (dungeon entrance/exit).
@@ -48,6 +51,11 @@ public class InputHandler
         Wait
     }
 
+    public InputHandler(InputBindings bindings)
+    {
+        _bindings = bindings;
+    }
+
     /// <summary>
     /// Call once per frame in Update(). Captures keyboard state
     /// and returns the action the player wants to take.
@@ -57,26 +65,29 @@ public class InputHandler
         _previousState = _currentState;
         _currentState = Keyboard.GetState();
 
-        // Movement — WASD and arrow keys
-        if (IsNewPress(Keys.W) || IsNewPress(Keys.Up))
+        if (_bindings.IsNewPress(GameAction.MoveNorth, _currentState, _previousState))
             return Action.MoveNorth;
-        if (IsNewPress(Keys.S) || IsNewPress(Keys.Down))
+        if (_bindings.IsNewPress(GameAction.MoveSouth, _currentState, _previousState))
             return Action.MoveSouth;
-        if (IsNewPress(Keys.D) || IsNewPress(Keys.Right))
+        if (_bindings.IsNewPress(GameAction.MoveEast, _currentState, _previousState))
             return Action.MoveEast;
-        if (IsNewPress(Keys.A) || IsNewPress(Keys.Left))
+        if (_bindings.IsNewPress(GameAction.MoveWest, _currentState, _previousState))
             return Action.MoveWest;
-
-        // Interact (open chests, enter dungeons, etc.)
-        if (IsNewPress(Keys.E))
+        if (_bindings.IsNewPress(GameAction.Interact, _currentState, _previousState))
             return Action.Interact;
-
-        // Wait / skip turn
-        if (IsNewPress(Keys.Space))
+        if (_bindings.IsNewPress(GameAction.Wait, _currentState, _previousState))
             return Action.Wait;
 
         return Action.None;
     }
+
+    /// <summary>
+    /// Convenience: check if a specific GameAction was freshly pressed this frame.
+    /// Only valid after GetAction() has been called (state is updated there).
+    /// Used by Game1 for UI toggles (I, R, Escape) that aren't turn actions.
+    /// </summary>
+    public bool IsNewPress(GameAction action)
+        => _bindings.IsNewPress(action, _currentState, _previousState);
 
     /// <summary>
     /// Process the action against the game state.
@@ -87,20 +98,24 @@ public class InputHandler
         if (action == Action.None) return false;
         if (state.IsGameOver) return false;
 
-        switch (action)
+        return action switch
         {
-            case Action.MoveNorth: return TryMove(state, 0, -1);
-            case Action.MoveSouth: return TryMove(state, 0, 1);
-            case Action.MoveEast: return TryMove(state, 1, 0);
-            case Action.MoveWest: return TryMove(state, -1, 0);
-            case Action.Wait:
-                state.Log("You wait...");
-                return true; // waiting still consumes a turn
-            case Action.Interact:
-                return TryInteract(state);
-            default:
-                return false;
-        }
+            Action.MoveNorth => TryMove(state, 0, -1),
+            Action.MoveSouth => TryMove(state, 0, 1),
+            Action.MoveEast => TryMove(state, 1, 0),
+            Action.MoveWest => TryMove(state, -1, 0),
+            Action.Wait => Wait(state),
+            Action.Interact => TryInteract(state),
+            _ => false,
+        };
+    }
+
+    // ── Turn actions ──────────────────────────────────────────────
+
+    private static bool Wait(GameState state)
+    {
+        state.Log("You wait...");
+        return true;
     }
 
     /// <summary>
@@ -114,39 +129,28 @@ public class InputHandler
         int newX = player.X + dx;
         int newY = player.Y + dy;
 
-        // Check map bounds and tile walkability
         if (state.ActiveMap == null || !state.ActiveMap.IsWalkable(newX, newY))
             return false;
 
-        // Check for blocking entity — this is how bump-attack works
         var blocker = state.GetBlockingEntityAt(newX, newY);
         if (blocker != null && blocker != player)
         {
-            // If it's an enemy, attack it
             if (blocker is Enemy enemy)
-            {
                 return AttackEnemy(state, player, enemy);
-            }
 
-            // Non-enemy blocker (chest, etc.) — can't walk through
             state.Log($"Something blocks your path at ({newX}, {newY}).");
             return true;
         }
 
-        // Clear to move
         player.Move(dx, dy);
-
-        // Auto-pickup: collect any items at the new position
         TryPickupItems(state);
-
         return true;
     }
 
     /// <summary>
     /// Resolve a player attack against an enemy.
-    /// Damage = player.Attack - enemy.Defense (minimum 1).
     /// </summary>
-    private bool AttackEnemy(GameState state, Player player, Enemy enemy)
+    private static bool AttackEnemy(GameState state, Player player, Enemy enemy)
     {
         int damage = enemy.TakeDamage(player.Attack);
 
@@ -158,20 +162,17 @@ public class InputHandler
         else
         {
             state.Log($"You hit {enemy.Name} for {damage} damage. ({enemy.Hp}/{enemy.MaxHp} HP)");
-
-            // Provoke passive enemies when attacked
             if (!enemy.IsProvoked)
                 enemy.IsProvoked = true;
         }
 
-        return true; // attack always consumes a turn
+        return true;
     }
 
     /// <summary>
     /// Pick up all WorldItem entities at the player's current position.
-    /// Items are added to inventory and removed from the world.
     /// </summary>
-    private void TryPickupItems(GameState state)
+    private static void TryPickupItems(GameState state)
     {
         var player = state.Player;
 
@@ -194,13 +195,10 @@ public class InputHandler
     }
 
     /// <summary>
-    /// Attempt to interact with whatever is at the player's position or adjacent.
-    /// Transition tiles: must be standing on them.
-    /// Chests: must be adjacent (1 tile away in cardinal direction).
+    /// Attempt to interact with whatever is at or adjacent to the player.
     /// </summary>
     private bool TryInteract(GameState state)
     {
-        // Check if standing on a special tile
         var tileId = state.ActiveMap?.GetTileId(state.Player.X, state.Player.Y);
 
         if (tileId == "base:dungeon_entrance" && state.Mode == GameMode.Overworld)
@@ -215,15 +213,12 @@ public class InputHandler
             return true;
         }
 
-        // Standing on dungeon_entrance while IN the dungeon — this is the entry point,
-        // not an exit. Let the player know.
         if (tileId == "base:dungeon_entrance" && state.Mode == GameMode.Dungeon)
         {
             state.Log("This is where you entered. Find the exit deeper in the dungeon.");
             return false;
         }
 
-        // Check adjacent tiles for interactable entities (chests)
         if (TryInteractWithAdjacent(state))
             return true;
 
@@ -231,16 +226,11 @@ public class InputHandler
         return false;
     }
 
-    /// <summary>
-    /// Check the four cardinal neighbors for an interactable entity.
-    /// Currently handles chests; more types can be added later.
-    /// </summary>
-    private bool TryInteractWithAdjacent(GameState state)
+    private static bool TryInteractWithAdjacent(GameState state)
     {
         int px = state.Player.X;
         int py = state.Player.Y;
 
-        // Check all 4 cardinal directions
         int[] dx = { 0, 0, 1, -1 };
         int[] dy = { -1, 1, 0, 0 };
 
@@ -255,19 +245,14 @@ public class InputHandler
                     continue;
 
                 if (entity is Chest chest)
-                {
                     return TryOpenChest(chest, state);
-                }
             }
         }
 
         return false;
     }
 
-    /// <summary>
-    /// Open a chest, adding its loot to the player's inventory.
-    /// </summary>
-    private bool TryOpenChest(Chest chest, GameState state)
+    private static bool TryOpenChest(Chest chest, GameState state)
     {
         var loot = chest.Open();
         if (loot == null)
@@ -282,25 +267,6 @@ public class InputHandler
         string display = count > 1 ? $"{def.Name} x{count}" : def.Name;
         state.Log($"Opened chest: found {display}!");
 
-        return true; // consumes a turn
-    }
-
-    /// <summary>
-    /// True only on the frame the key transitions from up to down.
-    /// This is what makes movement turn-based instead of continuous.
-    /// </summary>
-    private bool IsNewPress(Keys key)
-    {
-        return _currentState.IsKeyDown(key) && _previousState.IsKeyUp(key);
-    }
-
-    /// <summary>
-    /// Public version of IsNewPress for use by Game1 (e.g., R to regenerate).
-    /// Note: only valid after GetAction() has been called this frame,
-    /// since that's where keyboard state gets updated.
-    /// </summary>
-    public bool IsNewKeyPress(Keys key)
-    {
-        return _currentState.IsKeyDown(key) && _previousState.IsKeyUp(key);
+        return true;
     }
 }

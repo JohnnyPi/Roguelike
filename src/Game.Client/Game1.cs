@@ -12,7 +12,6 @@ using Game.Core.Map;
 using Game.ProcGen.Generators;
 using Microsoft.Xna.Framework;
 using Microsoft.Xna.Framework.Graphics;
-using Microsoft.Xna.Framework.Input;
 using Myra;
 using System;
 using System.Collections.Generic;
@@ -31,8 +30,11 @@ public class Game1 : Microsoft.Xna.Framework.Game
     // Our systems
     private TileRenderer _renderer = null!;
     private Camera _camera = null!;
+    private InputBindings _bindings = null!;
     private InputHandler _input = null!;
     private HudManager _hud = null!;
+    private MouseInputHandler _mouse = null!;
+    private PathController _path = null!;
 
     // Game state
     private GameState _state = null!;
@@ -74,20 +76,55 @@ public class Game1 : Microsoft.Xna.Framework.Game
         // ── Load all content from YAML ──────────────────────────────
         _content = LoadContentPacks();
 
+        // ── Load key bindings (controls.yml → fallback to defaults) ──
+        _bindings = LoadBindings();
+
         // Create systems
         _camera = new Camera(
             _graphics.PreferredBackBufferWidth,
             _graphics.PreferredBackBufferHeight
         );
         _renderer = new TileRenderer(GraphicsDevice, _spriteBatch);
-        _input = new InputHandler();
-        _hud = new HudManager();
+        _input = new InputHandler(_bindings);
+        _mouse = new MouseInputHandler();
+        _path = new PathController();   // SightRadius defaults to 8
+        _hud = new HudManager(_bindings);
 
         // Subscribe to map transition events from the interaction system
         _input.OnMapTransition += HandleMapTransition;
 
         // Start on the overworld
         _state = CreateOverworldState();
+    }
+
+    /// <summary>
+    /// Discovers and loads key bindings from controls.yml in BasePack.
+    /// Searches the same candidate paths as LoadContentPacks().
+    /// Falls back to compiled defaults if the file is missing or unreadable.
+    /// </summary>
+    private InputBindings LoadBindings()
+    {
+        var exeDir = AppDomain.CurrentDomain.BaseDirectory;
+        var candidates = new[]
+        {
+            Path.Combine(exeDir, "content", "BasePack", "config", "controls.yml"),
+            Path.Combine(exeDir, "..", "..", "..", "content", "BasePack", "config", "controls.yml"),
+            Path.Combine(exeDir, "..", "..", "..", "..", "..", "content", "BasePack", "config", "controls.yml"),
+            Path.Combine(Directory.GetCurrentDirectory(), "content", "BasePack", "config", "controls.yml"),
+        };
+
+        foreach (var candidate in candidates)
+        {
+            var resolved = Path.GetFullPath(candidate);
+            if (File.Exists(resolved))
+            {
+                System.Diagnostics.Debug.WriteLine($"[InputBindings] Loaded from: {resolved}");
+                return InputBindings.Load(resolved);
+            }
+        }
+
+        System.Diagnostics.Debug.WriteLine("[InputBindings] controls.yml not found — using defaults.");
+        return InputBindings.Defaults();
     }
 
     /// <summary>
@@ -196,48 +233,59 @@ public class Game1 : Microsoft.Xna.Framework.Game
 
     protected override void Update(GameTime gameTime)
     {
-        // Escape to quit
-        if (Keyboard.GetState().IsKeyDown(Keys.Escape))
+        // Advance keyboard + mouse snapshot first
+        var keyAction = _input.GetAction();
+        _mouse.Poll(_camera, _state.ActiveMap?.Width ?? 0, _state.ActiveMap?.Height ?? 0);
+
+        // ── Meta actions (no turn cost) ───────────────────────────────
+        if (_input.IsNewPress(GameAction.Quit))
             Exit();
 
-        // R to regenerate the overworld with a new seed (debug tool)
-        if (_input.IsNewKeyPress(Keys.R) && _state.Mode == GameMode.Overworld)
+        if (_input.IsNewPress(GameAction.RegenerateWorld) && _state.Mode == GameMode.Overworld)
         {
+            _path.Cancel();
             _state = CreateOverworldState();
         }
 
-        // I to toggle inventory panel
-        if (_input.IsNewKeyPress(Keys.I))
-        {
+        if (_input.IsNewPress(GameAction.ToggleInventory))
             _hud.ToggleInventory();
+
+        // ── Keyboard movement cancels any active path ─────────────────
+        if (keyAction != InputHandler.Action.None)
+            _path.CancelOnKeyboardInput();
+
+        // ── Mouse → path state machine ────────────────────────────────
+        _path.HandleMouse(_mouse, _state);
+
+        // ── Determine whose turn it is to act ─────────────────────────
+        bool turnTaken = false;
+
+        if (_path.State == PathController.PathState.Moving)
+        {
+            // Path movement owns the turn — one step per frame-tick
+            turnTaken = _path.Tick(_state);
+        }
+        else
+        {
+            // Normal keyboard action
+            turnTaken = _input.ProcessAction(keyAction, _state);
         }
 
-        // Get player input
-        var action = _input.GetAction();
-
-        // Process action — returns true if a turn was consumed
-        bool turnTaken = _input.ProcessAction(action, _state);
-
+        // ── Enemy AI (runs after any turn-consuming action) ───────────
         if (turnTaken && !_state.IsGameOver)
         {
-            // ── Enemy AI turns ────────────────────────────────────
-            // Process all enemies after the player's turn.
-            // Iterate over a snapshot to avoid mutation issues.
             var enemies = _state.Entities
                 .OfType<Enemy>()
                 .Where(e => e.IsAlive)
                 .ToList();
 
             foreach (var enemy in enemies)
-            {
-                if (_state.IsGameOver) break; // stop if player died mid-loop
                 enemy.TakeTurn(_state);
-            }
 
             _state.CleanupDead();
         }
 
-        // Update camera to follow player
+        // ── Camera ────────────────────────────────────────────────────
         if (_state.ActiveMap != null)
         {
             _camera.CenterOn(
@@ -248,9 +296,7 @@ public class Game1 : Microsoft.Xna.Framework.Game
             );
         }
 
-        // Update HUD from game state
         _hud.Update(gameTime, _state);
-
         base.Update(gameTime);
     }
 
@@ -258,21 +304,24 @@ public class Game1 : Microsoft.Xna.Framework.Game
     {
         GraphicsDevice.Clear(Color.Black);
 
-        // ── Game world rendering (our SpriteBatch) ────────────────
         _spriteBatch.Begin(
             SpriteSortMode.Deferred,
             BlendState.AlphaBlend,
-            SamplerState.PointClamp,  // crisp pixels, no blurring
+            SamplerState.PointClamp,
             null, null, null
         );
 
-        _renderer.Draw(_state, _camera);
+        // Pass path data — renderer draws overlay between tiles and entities
+        var previewPath = (_path.State == PathController.PathState.Preview ||
+                           _path.State == PathController.PathState.Moving)
+                          ? _path.PreviewPath
+                          : null;
+
+        _renderer.Draw(_state, _camera, previewPath, _path.Destination);
 
         _spriteBatch.End();
 
-        // ── HUD overlay (Myra manages its own SpriteBatch) ────────
         _hud.Render();
-
         base.Draw(gameTime);
     }
 
@@ -335,7 +384,7 @@ public class Game1 : Microsoft.Xna.Framework.Game
         _state.Log("—————————————————————————————");
         _state.Log($"You descend into the dungeon... (seed: {_dungeonSeed}, {generator.Rooms.Count} rooms, {enemyCount} enemies)");
         _state.Log("Find the green exit tile to return to the overworld.");
-        _state.Log("WASD to move. Walk into enemies to attack. E to interact.");
+        _state.Log($"{_bindings.PrimaryKeyLabel(GameAction.MoveNorth)}{_bindings.PrimaryKeyLabel(GameAction.MoveSouth)}{_bindings.PrimaryKeyLabel(GameAction.MoveEast)}{_bindings.PrimaryKeyLabel(GameAction.MoveWest)} to move. Walk into enemies to attack. {_bindings.PrimaryKeyLabel(GameAction.Interact)} to interact.");
     }
 
     /// <summary>
@@ -363,7 +412,7 @@ public class Game1 : Microsoft.Xna.Framework.Game
 
         _state.Log("—————————————————————————————");
         _state.Log("You emerge from the dungeon, back on the overworld.");
-        _state.Log("WASD to move. E on the red entrance to re-enter.");
+        _state.Log($"{_bindings.PrimaryKeyLabel(GameAction.MoveNorth)}{_bindings.PrimaryKeyLabel(GameAction.MoveSouth)}{_bindings.PrimaryKeyLabel(GameAction.MoveEast)}{_bindings.PrimaryKeyLabel(GameAction.MoveWest)} to move. {_bindings.PrimaryKeyLabel(GameAction.Interact)} on the red entrance to re-enter.");
     }
 
     // ── State Creation Methods ──────────────────────────────────────
@@ -409,7 +458,12 @@ public class Game1 : Microsoft.Xna.Framework.Game
         state.OverworldPlayerPosition = (generator.SpawnPosition.X, generator.SpawnPosition.Y);
 
         state.Log($"Overworld generated (seed: {_overworldSeed}).");
-        state.Log("WASD to move. E to interact. I for inventory. R to regenerate.");
+        state.Log(InputBindings.HintLine(_bindings,
+            (GameAction.MoveNorth, "Move"),
+            (GameAction.Interact, "Interact"),
+            (GameAction.ToggleInventory, "Inventory"),
+            (GameAction.RegenerateWorld, "Regen")
+        ));
         state.Log("Find the red dungeon entrance tile and press E!");
 
         return state;
@@ -449,7 +503,7 @@ public class Game1 : Microsoft.Xna.Framework.Game
 
         int enemyCount = generator.SpawnedEntities.OfType<Enemy>().Count();
         state.Log($"Dungeon generated (seed: {_dungeonSeed}). {generator.Rooms.Count} rooms, {enemyCount} enemies.");
-        state.Log("WASD to move. Walk into enemies to attack. E on green exit to leave.");
+        state.Log($"{_bindings.PrimaryKeyLabel(GameAction.MoveNorth)}{_bindings.PrimaryKeyLabel(GameAction.MoveSouth)}{_bindings.PrimaryKeyLabel(GameAction.MoveEast)}{_bindings.PrimaryKeyLabel(GameAction.MoveWest)} to move. Walk into enemies to attack. {_bindings.PrimaryKeyLabel(GameAction.Interact)} on green exit to leave.");
 
         return state;
     }

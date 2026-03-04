@@ -38,11 +38,14 @@ public class TileRenderer
     /// Draw the visible portion of the map and all entities.
     /// Call this between SpriteBatch.Begin() and .End().
     /// </summary>
-    public void Draw(GameState state, Camera camera)
+    public void Draw(GameState state, Camera camera,
+                 IReadOnlyList<Point>? pathPreview = null,
+                 Point? pathDestination = null)
     {
         if (state.ActiveMap == null) return;
 
         DrawTiles(state, camera);
+        DrawPathOverlay(pathPreview, pathDestination, camera);   // ← new, between tiles and entities
         DrawEntities(state, camera);
         DrawPlayer(state, camera);
     }
@@ -206,6 +209,54 @@ public class TileRenderer
                 hpColor);
         }
     }
+
+    private void DrawPathOverlay(IReadOnlyList<Point>? path, Point? destination, Camera camera)
+    {
+        if (path == null || path.Count == 0) return;
+
+        // Step tiles: semi-transparent yellow
+        var stepColor = new Color(255, 220, 50, 100);
+
+        // Destination tile: slightly more opaque, distinct tint
+        var destColor = new Color(50, 220, 255, 140);
+
+        for (int i = 0; i < path.Count; i++)
+        {
+            var tile = path[i];
+            bool isDest = (destination.HasValue && tile == destination.Value)
+                       || i == path.Count - 1;
+
+            var color = isDest ? destColor : stepColor;
+
+            var screenPos = new Vector2(
+                tile.X * TileSize - camera.X,
+                tile.Y * TileSize - camera.Y
+            );
+
+            // Fill the tile with semi-transparent color
+            _spriteBatch.Draw(
+                _pixel,
+                new Rectangle((int)screenPos.X, (int)screenPos.Y, TileSize, TileSize),
+                color
+            );
+
+            // Draw a 2px inner border to make each step cell stand out
+            var borderColor = isDest
+                ? new Color(50, 220, 255, 200)
+                : new Color(255, 220, 50, 180);
+
+            int b = 2;
+            // Top
+            _spriteBatch.Draw(_pixel, new Rectangle((int)screenPos.X, (int)screenPos.Y, TileSize, b), borderColor);
+            // Bottom
+            _spriteBatch.Draw(_pixel, new Rectangle((int)screenPos.X, (int)screenPos.Y + TileSize - b, TileSize, b), borderColor);
+            // Left
+            _spriteBatch.Draw(_pixel, new Rectangle((int)screenPos.X, (int)screenPos.Y, b, TileSize), borderColor);
+            // Right
+            _spriteBatch.Draw(_pixel, new Rectangle((int)screenPos.X + TileSize - b, (int)screenPos.Y, b, TileSize), borderColor);
+        }
+    }
+
 
     /// <summary>
     /// Get the display color for an enemy, parsed from its MonsterDef.
