@@ -7,8 +7,10 @@ using Game.Content;
 using Game.Core;
 using Game.Core.Entities;
 using Game.Core.Items;
-using Game.Core.Tiles;
+using Game.Core.Lighting;
 using Game.Core.Map;
+using Game.Core.Tiles;
+using Game.Core.World;
 using Game.ProcGen.Generators;
 using Microsoft.Xna.Framework;
 using Microsoft.Xna.Framework.Graphics;
@@ -27,7 +29,7 @@ public class Game1 : Microsoft.Xna.Framework.Game
     private GraphicsDeviceManager _graphics;
     private SpriteBatch _spriteBatch = null!;
 
-    // Our systems
+    // ── Systems ──────────────────────────────────────────────────────
     private TileRenderer _renderer = null!;
     private Camera _camera = null!;
     private InputBindings _bindings = null!;
@@ -35,14 +37,15 @@ public class Game1 : Microsoft.Xna.Framework.Game
     private HudManager _hud = null!;
     private MouseInputHandler _mouse = null!;
     private PathController _path = null!;
+    private TorchFlicker _flicker = null!;
 
-    // Game state
+    // ── Game state ───────────────────────────────────────────────────
     private GameState _state = null!;
 
-    // Content registry — loaded from YAML by Game.Content
+    // ── Content registry — loaded from YAML by Game.Content ─────────
     private ContentRegistry _content = null!;
 
-    // Current seeds for display/debugging
+    // ── Current seeds for display/debugging ─────────────────────────
     private int _overworldSeed;
     private int _dungeonSeed;
 
@@ -59,7 +62,7 @@ public class Game1 : Microsoft.Xna.Framework.Game
 
     protected override void Initialize()
     {
-        Window.Title = "Roguelike — Phase 8 (Combat)";
+        Window.Title = "Roguelike — Phase 9 (Lighting & FOW)";
         Window.AllowUserResizing = true;
         Window.ClientSizeChanged += OnWindowResize;
 
@@ -79,7 +82,7 @@ public class Game1 : Microsoft.Xna.Framework.Game
         // ── Load key bindings (controls.yml → fallback to defaults) ──
         _bindings = LoadBindings();
 
-        // Create systems
+        // ── Create systems ───────────────────────────────────────────
         _camera = new Camera(
             _graphics.PreferredBackBufferWidth,
             _graphics.PreferredBackBufferHeight
@@ -87,15 +90,34 @@ public class Game1 : Microsoft.Xna.Framework.Game
         _renderer = new TileRenderer(GraphicsDevice, _spriteBatch);
         _input = new InputHandler(_bindings);
         _mouse = new MouseInputHandler();
-        _path = new PathController();   // SightRadius defaults to 8
+        _path = new PathController();
         _hud = new HudManager(_bindings);
+        _flicker = new TorchFlicker();
 
-        // Subscribe to map transition events from the interaction system
+        // ── Subscribe to map transition events ───────────────────────
         _input.OnMapTransition += HandleMapTransition;
 
-        // Start on the overworld
+        // ── Start on the overworld ───────────────────────────────────
         _state = CreateOverworldState();
+
+        // ── Subscribe to clock/weather events ────────────────────────
+        _state.Clock.PeriodChanged += OnPeriodChanged;
+        _state.Weather.WeatherChanged += OnWeatherChanged;
     }
+
+    // ── Event handlers ────────────────────────────────────────────────
+
+    private void OnPeriodChanged(TimePeriod from, TimePeriod to)
+    {
+        _state.Log($"The {_state.Clock.PeriodName} begins. ({_state.Clock.TimeString})");
+    }
+
+    private void OnWeatherChanged(WeatherState from, WeatherState to)
+    {
+        _state.Log($"The weather turns {_state.Weather.Name}.");
+    }
+
+    // ── Key binding loader ────────────────────────────────────────────
 
     /// <summary>
     /// Discovers and loads key bindings from controls.yml in BasePack.
@@ -127,6 +149,8 @@ public class Game1 : Microsoft.Xna.Framework.Game
         return InputBindings.Defaults();
     }
 
+    // ── Content loader ────────────────────────────────────────────────
+
     /// <summary>
     /// Discover and load content packs from the content/ directory.
     /// Resolves the content root relative to the executable.
@@ -134,13 +158,12 @@ public class Game1 : Microsoft.Xna.Framework.Game
     /// </summary>
     private ContentRegistry LoadContentPacks()
     {
-        // Look for the content/ directory relative to the executable
         var exeDir = AppDomain.CurrentDomain.BaseDirectory;
         var candidates = new[]
         {
             Path.Combine(exeDir, "content"),
-            Path.Combine(exeDir, "..", "..", "..", "content"),            // running from bin/Debug/net8.0
-            Path.Combine(exeDir, "..", "..", "..", "..", "..", "content"), // deeper nesting
+            Path.Combine(exeDir, "..", "..", "..", "content"),
+            Path.Combine(exeDir, "..", "..", "..", "..", "..", "content"),
             Path.Combine(Directory.GetCurrentDirectory(), "content"),
         };
 
@@ -165,15 +188,12 @@ public class Game1 : Microsoft.Xna.Framework.Game
         var loader = new ContentLoader();
         var registry = loader.LoadAll(contentRoot);
 
-        // Print load log
         foreach (var msg in loader.Log)
             System.Diagnostics.Debug.WriteLine($"[Content] {msg}");
 
-        // Print errors
         foreach (var err in loader.Errors)
             System.Diagnostics.Debug.WriteLine($"[Content ERROR] {err}");
 
-        // If loading failed critically, fall back
         if (loader.Errors.Count > 0 || registry.Tiles.Count == 0)
         {
             System.Diagnostics.Debug.WriteLine("WARNING: Content loading had errors. Using hardcoded fallback.");
@@ -184,28 +204,25 @@ public class Game1 : Microsoft.Xna.Framework.Game
     }
 
     /// <summary>
-    /// Hardcoded fallback registry — identical to the old BuildTileRegistry() +
-    /// BuildItemDefs() methods. Used only if YAML loading fails so the game
+    /// Hardcoded fallback registry. Used only if YAML loading fails so the game
     /// doesn't crash. Should never be needed once content/ is properly deployed.
     /// </summary>
     private ContentRegistry BuildFallbackRegistry()
     {
         var registry = new ContentRegistry();
 
-        // Tiles (same as old BuildTileRegistry)
         var tiles = new[]
         {
-            new TileDef { Id = "base:grass", Name = "Grass", Walkable = true, Color = "#3A7D2C" },
-            new TileDef { Id = "base:wall", Name = "Wall", Walkable = false, Color = "#4A4A4A" },
-            new TileDef { Id = "base:floor", Name = "Stone Floor", Walkable = true, Color = "#8B8B7A" },
-            new TileDef { Id = "base:dirt", Name = "Dirt", Walkable = true, Color = "#7A6033" },
-            new TileDef { Id = "base:water", Name = "Water", Walkable = false, Color = "#2255AA" },
-            new TileDef { Id = "base:dungeon_entrance", Name = "Dungeon Entrance", Walkable = true, Color = "#AA3333" },
-            new TileDef { Id = "base:dungeon_exit", Name = "Dungeon Exit", Walkable = true, Color = "#33AA33" },
+            new TileDef { Id = "base:grass",           Name = "Grass",           Walkable = true,  Color = "#3A7D2C" },
+            new TileDef { Id = "base:wall",             Name = "Wall",            Walkable = false, Color = "#4A4A4A" },
+            new TileDef { Id = "base:floor",            Name = "Stone Floor",     Walkable = true,  Color = "#8B8B7A" },
+            new TileDef { Id = "base:dirt",             Name = "Dirt",            Walkable = true,  Color = "#7A6033" },
+            new TileDef { Id = "base:water",            Name = "Water",           Walkable = false, Color = "#2255AA" },
+            new TileDef { Id = "base:dungeon_entrance", Name = "Dungeon Entrance",Walkable = true,  Color = "#AA3333" },
+            new TileDef { Id = "base:dungeon_exit",     Name = "Dungeon Exit",    Walkable = true,  Color = "#33AA33" },
         };
         foreach (var t in tiles) registry.RegisterTile(t);
 
-        // Items (same as old BuildItemDefs)
         registry.RegisterItem(new ItemDef
         {
             Id = "base:gold_coin",
@@ -231,6 +248,8 @@ public class Game1 : Microsoft.Xna.Framework.Game
         return registry;
     }
 
+    // ── Update ────────────────────────────────────────────────────────
+
     protected override void Update(GameTime gameTime)
     {
         // Advance keyboard + mouse snapshot first
@@ -244,7 +263,16 @@ public class Game1 : Microsoft.Xna.Framework.Game
         if (_input.IsNewPress(GameAction.RegenerateWorld) && _state.Mode == GameMode.Overworld)
         {
             _path.Cancel();
+
+            // Unsubscribe old state events before replacing
+            _state.Clock.PeriodChanged -= OnPeriodChanged;
+            _state.Weather.WeatherChanged -= OnWeatherChanged;
+
             _state = CreateOverworldState();
+
+            // Subscribe to new state
+            _state.Clock.PeriodChanged += OnPeriodChanged;
+            _state.Weather.WeatherChanged += OnWeatherChanged;
         }
 
         if (_input.IsNewPress(GameAction.ToggleInventory))
@@ -262,18 +290,17 @@ public class Game1 : Microsoft.Xna.Framework.Game
 
         if (_path.State == PathController.PathState.Moving)
         {
-            // Path movement owns the turn — one step per frame-tick
             turnTaken = _path.Tick(_state);
         }
         else
         {
-            // Normal keyboard action
             turnTaken = _input.ProcessAction(keyAction, _state);
         }
 
-        // ── Enemy AI (runs after any turn-consuming action) ───────────
+        // ── Post-turn simulation ──────────────────────────────────────
         if (turnTaken && !_state.IsGameOver)
         {
+            // Enemy AI
             var enemies = _state.Entities
                 .OfType<Enemy>()
                 .Where(e => e.IsAlive)
@@ -283,6 +310,31 @@ public class Game1 : Microsoft.Xna.Framework.Game
                 enemy.TakeTurn(_state);
 
             _state.CleanupDead();
+
+            // ── Clock & weather tick (overworld only) ─────────────────
+            if (_state.Mode == GameMode.Overworld)
+            {
+                _state.Clock.Tick();
+                _state.Weather.Tick(_state.Clock.TimeOfDay);
+            }
+
+            // ── FOV recompute ─────────────────────────────────────────
+            // Always recompute after any turn — player or enemies may have
+            // changed the state that matters (player definitely moved if
+            // turnTaken is true from a move action).
+            _state.ActiveMap?.Visibility?.Recompute(
+                _state.Player.X,
+                _state.Player.Y,
+                _state.EffectiveFovRadius
+            );
+
+            // ── Overworld lighting update from clock + weather ─────────
+            // Only the ambient changes on the overworld (no point lights).
+            if (_state.Mode == GameMode.Overworld && _state.ActiveMap?.Lighting != null)
+            {
+                _state.ActiveMap.Lighting.AmbientLight = _state.OverworldAmbient;
+                _state.ActiveMap.Lighting.Recompute(_state.LightSources);
+            }
         }
 
         // ── Camera ────────────────────────────────────────────────────
@@ -300,9 +352,23 @@ public class Game1 : Microsoft.Xna.Framework.Game
         base.Update(gameTime);
     }
 
+    // ── Draw ──────────────────────────────────────────────────────────
+
     protected override void Draw(GameTime gameTime)
     {
         GraphicsDevice.Clear(Color.Black);
+
+        // ── Torch flicker (real-time, runs every frame regardless of turns) ──
+        // This recomputes the dungeon LightMap each frame with animated per-source
+        // intensities. On the overworld there are no LightSources so this is a no-op.
+        _flicker.Update(gameTime.ElapsedGameTime.TotalSeconds);
+        if (_state.Mode == GameMode.Dungeon
+            && _state.ActiveMap?.Lighting != null
+            && _state.LightSources.Count > 0)
+        {
+            var intensities = _flicker.GetIntensities(_state.LightSources);
+            _state.ActiveMap.Lighting.Recompute(_state.LightSources, intensities);
+        }
 
         _spriteBatch.Begin(
             SpriteSortMode.Deferred,
@@ -311,7 +377,6 @@ public class Game1 : Microsoft.Xna.Framework.Game
             null, null, null
         );
 
-        // Pass path data — renderer draws overlay between tiles and entities
         var previewPath = (_path.State == PathController.PathState.Preview ||
                            _path.State == PathController.PathState.Moving)
                           ? _path.PreviewPath
@@ -325,7 +390,7 @@ public class Game1 : Microsoft.Xna.Framework.Game
         base.Draw(gameTime);
     }
 
-    // ── Map Transition Handler ────────────────────────────────────
+    // ── Map Transition Handler ────────────────────────────────────────
 
     private void HandleMapTransition(InputHandler.TransitionRequest request)
     {
@@ -350,7 +415,6 @@ public class Game1 : Microsoft.Xna.Framework.Game
         _state.OverworldMap = _state.ActiveMap;
         _state.OverworldPlayerPosition = (_state.Player.X, _state.Player.Y);
 
-        // Generate a new dungeon — tile registry comes from content
         _dungeonSeed = Environment.TickCount;
 
         var generator = new DungeonGenerator
@@ -360,25 +424,45 @@ public class Game1 : Microsoft.Xna.Framework.Game
             MinRooms = 6,
             MaxRooms = 12,
             RoomMinSize = 5,
-            RoomMaxSize = 10
+            RoomMaxSize = 10,
+            // Use the cave lighting preset — will eventually come from blueprint YAML
+            LightingConfig = DungeonLightingConfig.Cave
         };
 
-        // Pass the content registry's tile dictionary, item list, and monster list
         var tileDict = new Dictionary<string, TileDef>(_content.Tiles);
         var monsterList = _content.MonsterList.Count > 0 ? _content.MonsterList.ToList() : null;
         var map = generator.Generate(tileDict, _dungeonSeed, _content.ItemList.ToList(), monsterList);
 
-        // Swap the active map and reposition the player at the dungeon entrance
+        // ── Initialize dungeon lighting ───────────────────────────────
+        var lightingCfg = generator.LightingConfig;
+        map.InitializeLighting(lightingCfg.AmbientLight);
+
+        // Copy generated torch positions into state
+        _state.LightSources = new List<LightSource>(generator.LightSources);
+
+        // Set FOV radius from blueprint config
+        _state.BaseFovRadius = lightingCfg.PlayerFovRadius;
+
+        // Initial lighting pass (before flicker kicks in)
+        map.Lighting!.Recompute(_state.LightSources);
+
+        // ── Swap active map ───────────────────────────────────────────
         _state.ActiveMap = map;
         _state.Mode = GameMode.Dungeon;
         _state.Player.SetPosition(generator.EntrancePosition.X, generator.EntrancePosition.Y);
 
-        // Clear old entities and add freshly spawned items/chests/enemies
+        // Initial FOV from entrance position
+        map.Visibility?.Recompute(
+            generator.EntrancePosition.X,
+            generator.EntrancePosition.Y,
+            _state.EffectiveFovRadius
+        );
+
+        // ── Populate entities ─────────────────────────────────────────
         _state.Entities.Clear();
         foreach (var entity in generator.SpawnedEntities)
             _state.Entities.Add(entity);
 
-        // Count enemies for the log message
         int enemyCount = generator.SpawnedEntities.OfType<Enemy>().Count();
 
         _state.Log("—————————————————————————————");
@@ -399,23 +483,41 @@ public class Game1 : Microsoft.Xna.Framework.Game
             return;
         }
 
-        // Restore the overworld map
+        // Restore the overworld map and mode
         _state.ActiveMap = _state.OverworldMap;
         _state.Mode = GameMode.Overworld;
 
-        // Restore player position on the overworld
+        // Restore player position
         var pos = _state.OverworldPlayerPosition.Value;
         _state.Player.SetPosition(pos.X, pos.Y);
 
-        // Clear dungeon entities
+        // Clear dungeon entities and light sources
         _state.Entities.Clear();
+        _state.LightSources.Clear();
+
+        // Restore overworld FOV radius
+        _state.BaseFovRadius = 12;
+
+        // Recompute FOV at restored position
+        _state.ActiveMap?.Visibility?.Recompute(
+            pos.X,
+            pos.Y,
+            _state.EffectiveFovRadius
+        );
+
+        // Re-sync overworld lighting ambient to current clock/weather state
+        if (_state.ActiveMap?.Lighting != null)
+        {
+            _state.ActiveMap.Lighting.AmbientLight = _state.OverworldAmbient;
+            _state.ActiveMap.Lighting.Recompute(_state.LightSources);
+        }
 
         _state.Log("—————————————————————————————");
         _state.Log("You emerge from the dungeon, back on the overworld.");
         _state.Log($"{_bindings.PrimaryKeyLabel(GameAction.MoveNorth)}{_bindings.PrimaryKeyLabel(GameAction.MoveSouth)}{_bindings.PrimaryKeyLabel(GameAction.MoveEast)}{_bindings.PrimaryKeyLabel(GameAction.MoveWest)} to move. {_bindings.PrimaryKeyLabel(GameAction.Interact)} on the red entrance to re-enter.");
     }
 
-    // ── State Creation Methods ──────────────────────────────────────
+    // ── State Creation Methods ────────────────────────────────────────
 
     private GameState CreateOverworldState()
     {
@@ -432,21 +534,20 @@ public class Game1 : Microsoft.Xna.Framework.Game
             Octaves = 4
         };
 
-        // Pass biome defs so the generator reads thresholds from data
         var tileDict = new Dictionary<string, TileDef>(_content.Tiles);
         TileMap map;
         if (_content.Biomes.Count > 0)
-        {
             map = generator.Generate(tileDict, _overworldSeed, _content.Biomes);
-        }
         else
-        {
             map = generator.Generate(tileDict, _overworldSeed);
-        }
+
+        // ── Initialize overworld lighting ─────────────────────────────
+        // Ambient starts at the clock's current color (mid-morning by default).
+        // No point light sources on the overworld — sky lighting is ambient-only.
+        state.BaseFovRadius = 12;
+        map.InitializeLighting(state.OverworldAmbient);
 
         state.ActiveMap = map;
-
-        // Also store as the preserved overworld (for returning from dungeons later)
         state.OverworldMap = map;
 
         // Place the player at the spawn point
@@ -454,8 +555,14 @@ public class Game1 : Microsoft.Xna.Framework.Game
         player.SetPosition(generator.SpawnPosition.X, generator.SpawnPosition.Y);
         state.Player = player;
 
-        // Remember entrance position for later reference
         state.OverworldPlayerPosition = (generator.SpawnPosition.X, generator.SpawnPosition.Y);
+
+        // Initial FOV compute at spawn
+        map.Visibility?.Recompute(
+            generator.SpawnPosition.X,
+            generator.SpawnPosition.Y,
+            state.EffectiveFovRadius
+        );
 
         state.Log($"Overworld generated (seed: {_overworldSeed}).");
         state.Log(InputBindings.HintLine(_bindings,
@@ -486,17 +593,33 @@ public class Game1 : Microsoft.Xna.Framework.Game
             MinRooms = 6,
             MaxRooms = 12,
             RoomMinSize = 5,
-            RoomMaxSize = 10
+            RoomMaxSize = 10,
+            LightingConfig = DungeonLightingConfig.Cave
         };
 
         var tileDict = new Dictionary<string, TileDef>(_content.Tiles);
         var monsterList = _content.MonsterList.Count > 0 ? _content.MonsterList.ToList() : null;
         var map = generator.Generate(tileDict, _dungeonSeed, _content.ItemList.ToList(), monsterList);
+
+        var lightingCfg = generator.LightingConfig;
+        map.InitializeLighting(lightingCfg.AmbientLight);
+
+        state.LightSources = new List<LightSource>(generator.LightSources);
+        state.BaseFovRadius = lightingCfg.PlayerFovRadius;
+
+        map.Lighting!.Recompute(state.LightSources);
+
         state.ActiveMap = map;
 
         var player = new Player();
         player.SetPosition(generator.EntrancePosition.X, generator.EntrancePosition.Y);
         state.Player = player;
+
+        map.Visibility?.Recompute(
+            generator.EntrancePosition.X,
+            generator.EntrancePosition.Y,
+            state.EffectiveFovRadius
+        );
 
         foreach (var entity in generator.SpawnedEntities)
             state.Entities.Add(entity);

@@ -260,8 +260,8 @@ public sealed class PathController
         queue.Enqueue(from);
         cameFrom[from] = from;
 
-        int[] dx = { 0, 0, 1, -1 };
-        int[] dy = { -1, 1, 0, 0 };
+        int[] dx = { 0, 0, 1, -1, 1, -1, 1, -1 };
+        int[] dy = { -1, 1, 0, 0, -1, -1, 1, 1 };
 
         while (queue.Count > 0)
         {
@@ -270,7 +270,7 @@ public sealed class PathController
             if (current == to)
                 return ReconstructPath(cameFrom, from, to);
 
-            for (int d = 0; d < 4; d++)
+            for (int d = 0; d < 8; d++)
             {
                 var next = new Point(current.X + dx[d], current.Y + dy[d]);
 

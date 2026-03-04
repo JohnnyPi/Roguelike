@@ -27,7 +27,19 @@ moveWest:
   - Left
 
 interact:
+  - F
+
+moveNorthEast:
   - E
+
+moveNorthWest:
+  - Q
+
+moveSouthEast:
+  - C
+
+moveSouthWest:
+  - Z
 
 wait:
   - Space

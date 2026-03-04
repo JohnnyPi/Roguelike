@@ -1,7 +1,12 @@
-// src/Game.Core/GameState.cs
+ï»¿// src/Game.Core/GameState.cs
 
+using System;
+using System.Collections.Generic;
 using Game.Core.Entities;
+using Game.Core.Lighting;
 using Game.Core.Map;
+using Game.Core.World;
+using Microsoft.Xna.Framework;
 
 namespace Game.Core;
 
@@ -17,20 +22,22 @@ public enum GameMode
 
 /// <summary>
 /// Central game state container. Holds the current mode, active map,
-/// player reference, and entity lists.
-/// 
+/// player reference, entity lists, and the lighting/time simulation.
+///
 /// This is the "single source of truth" that systems read from and write to.
-/// Not a singleton — created once in Game1 and passed to systems that need it.
+/// Not a singleton -- created once in Game1 and passed to systems that need it.
 /// </summary>
 public class GameState
 {
+    // -- Core ------------------------------------------------------------
+
     /// <summary>Current game mode.</summary>
     public GameMode Mode { get; set; } = GameMode.Overworld;
 
     /// <summary>The map currently being played on.</summary>
     public TileMap? ActiveMap { get; set; }
 
-    /// <summary>Player entity — always exists once the game starts.</summary>
+    /// <summary>Player entity -- always exists once the game starts.</summary>
     public Player Player { get; set; } = null!;
 
     /// <summary>All non-player entities on the current map.</summary>
@@ -47,6 +54,76 @@ public class GameState
     /// </summary>
     public (int X, int Y)? OverworldPlayerPosition { get; set; }
 
+    // -- Lighting & FOW --------------------------------------------------
+
+    /// <summary>
+    /// Player FOV radius in tiles.
+    /// Base value before weather/status modifiers.
+    /// Overworld: 12 (wide open vistas).
+    /// Dungeon: 8 (claustrophobic corridors).
+    /// </summary>
+    public int BaseFovRadius { get; set; } = 12;
+
+    /// <summary>
+    /// Effective FOV radius after applying weather, status effects, etc.
+    /// Use this for VisibilityMap.Recompute() calls.
+    /// </summary>
+    public int EffectiveFovRadius
+    {
+        get
+        {
+            int radius = BaseFovRadius;
+            // Weather penalty (only on overworld)
+            if (Mode == GameMode.Overworld)
+                radius -= Weather.VisibilityPenalty;
+            return Math.Max(2, radius); // never less than 2
+        }
+    }
+
+    /// <summary>
+    /// Active light sources for the current map.
+    /// On the overworld this is always empty (ambient light handles everything).
+    /// In dungeons this is populated by DungeonGenerator (torches, braziers).
+    /// </summary>
+    public List<LightSource> LightSources { get; set; } = new();
+
+    // -- World simulation ------------------------------------------------
+
+    /// <summary>
+    /// Turn-based world clock. Drives day/night ambient color.
+    /// Ticked once per player turn while in Overworld mode.
+    /// </summary>
+    public WorldClock Clock { get; } = new WorldClock();
+
+    /// <summary>
+    /// Weather simulation. Ticked together with Clock on overworld turns.
+    /// Provides LightMultiplier and OverlayTint to the renderer.
+    /// </summary>
+    public WeatherSystem Weather { get; } = new WeatherSystem();
+
+    // -- Computed overworld ambient ---------------------------------------
+
+    /// <summary>
+    /// The ambient light color to use this frame on the overworld.
+    /// = WorldClock color x WeatherSystem multiplier (channel-by-channel).
+    /// </summary>
+    public Color OverworldAmbient
+    {
+        get
+        {
+            var clock = Clock.AmbientLight;
+            var weather = Weather.LightMultiplier;
+            return new Color(
+                (int)(clock.R * weather.R / 255),
+                (int)(clock.G * weather.G / 255),
+                (int)(clock.B * weather.B / 255),
+                255
+            );
+        }
+    }
+
+    // -- Message log -----------------------------------------------------
+
     /// <summary>
     /// Message log for combat, pickups, interactions.
     /// The UI reads from this to display the combat log.
@@ -61,10 +138,12 @@ public class GameState
     {
         MessageLog.Add(message);
 
-        // Keep the log from growing forever — 200 messages is plenty
+        // Keep the log from growing forever -- 200 messages is plenty
         if (MessageLog.Count > 200)
             MessageLog.RemoveAt(0);
     }
+
+    // -- Entity queries --------------------------------------------------
 
     /// <summary>
     /// Get the entity (if any) blocking a specific tile.

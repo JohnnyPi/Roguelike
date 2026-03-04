@@ -48,7 +48,12 @@ public sealed class InputBindings
         b.Bind(GameAction.MoveEast, Keys.D, Keys.Right);
         b.Bind(GameAction.MoveWest, Keys.A, Keys.Left);
 
-        b.Bind(GameAction.Interact, Keys.E);
+        b.Bind(GameAction.MoveNorthEast, Keys.E);
+        b.Bind(GameAction.MoveNorthWest, Keys.Q);
+        b.Bind(GameAction.MoveSouthEast, Keys.C);
+        b.Bind(GameAction.MoveSouthWest, Keys.Z);
+
+        b.Bind(GameAction.Interact, Keys.F);
         b.Bind(GameAction.Wait, Keys.Space);
 
         b.Bind(GameAction.ToggleInventory, Keys.I);

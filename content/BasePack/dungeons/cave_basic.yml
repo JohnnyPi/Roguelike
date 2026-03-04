@@ -1,13 +1,10 @@
-# content/BasePack/dungeons/cave_basic.yml
-# Basic cave dungeon blueprint (Phase A � config only, not full pipeline yet).
-# Values here replace the hardcoded properties in DungeonGenerator
-# and the magic numbers in Game1.EnterDungeon().
-
+﻿# content/BasePack/dungeons/cave_basic.yml
 schema: dungeon_blueprint.v1
 id: base:cave_basic
 name: "Basic Cave"
 tags: [cave, natural, earlygame]
-requires: []
+requires:
+  - base:tileset_cave
 
 defaults:
   seedSalt: "cave_basic"
@@ -19,32 +16,62 @@ defaults:
 
   size:
     grid:
-      widthMin: 50
-      widthMax: 70
-      heightMin: 35
-      heightMax: 45
-    targetFloorRatioMin: 0.28
-    targetFloorRatioMax: 0.45
+      widthMin: 60
+      widthMax: 60
+      heightMin: 40
+      heightMax: 40
+    targetFloorRatioMin: 0.30
+    targetFloorRatioMax: 0.50
 
   rooms:
-    minRooms: 6
-    maxRooms: 12
-    roomMinSize: 5
-    roomMaxSize: 10
-    maxPlacementAttempts: 200
+    countMin: 6
+    countMax: 12
+    widthMin: 5
+    widthMax: 10
+    heightMin: 5
+    heightMax: 10
 
   connectivity:
     mustBeConnected: true
-    allowLoops: true
-    loopChance: 0.25
+    corridorStyle: "l_shaped"
 
   entranceExit:
     requireEntrance: true
-    requireExit: true
-    preferFarthestExit: true
+    requireExit: false
 
-  population:
-    itemsPerRoom: "0..2"
-    chestChance: 0.40
-    monsterTableId: base:spawn_cave_monsters
-    itemTableId: base:loot_cave_common
+  # ── Lighting ─────────────────────────────────────────────────────
+  lighting:
+    # Ambient light color as RGB [0–255]. Black = pitch dark.
+    # For a cave: very dim, slightly blue-grey so explored tiles
+    # are still faintly readable without being lit by torches.
+    ambientR: 8
+    ambientG: 9
+    ambientB: 14
+
+    # How many torch light sources to place (distributed across rooms).
+    # One torch per room on average; entrance room always gets one.
+    torchesPerRoom: 1.0
+
+    # Torch light radius in tiles.
+    torchRadius: 5.0
+
+    # Player FOV radius when inside this dungeon (tiles).
+    # Smaller = more claustrophobic.
+    playerFovRadius: 8
+
+population:
+  monsterTableId: base:spawn_cave_monsters
+  itemTableId: base:loot_cave_common
+  itemRolls:
+    min: 2
+    max: 5
+  chestCount:
+    min: 1
+    max: 3
+
+validation:
+  maxAttempts: 30
+  onFail: regen
+  assertions:
+    - id: connected
+      kind: must_be_connected

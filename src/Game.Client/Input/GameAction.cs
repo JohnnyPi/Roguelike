@@ -18,6 +18,10 @@ public enum GameAction
     MoveSouth,
     MoveEast,
     MoveWest,
+    MoveNorthEast,
+    MoveNorthWest,
+    MoveSouthEast,
+    MoveSouthWest,
 
     // ── In-world actions ──────────────────────────────────────────
     Interact,   // open chests, enter/exit dungeons

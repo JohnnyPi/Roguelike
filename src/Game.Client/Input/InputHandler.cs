@@ -47,6 +47,10 @@ public class InputHandler
         MoveSouth,
         MoveEast,
         MoveWest,
+        MoveNorthEast,
+        MoveNorthWest,
+        MoveSouthEast,
+        MoveSouthWest,
         Interact,
         Wait
     }
@@ -73,6 +77,14 @@ public class InputHandler
             return Action.MoveEast;
         if (_bindings.IsNewPress(GameAction.MoveWest, _currentState, _previousState))
             return Action.MoveWest;
+        if (_bindings.IsNewPress(GameAction.MoveNorthEast, _currentState, _previousState))
+            return Action.MoveNorthEast;
+        if (_bindings.IsNewPress(GameAction.MoveNorthWest, _currentState, _previousState))
+            return Action.MoveNorthWest;
+        if (_bindings.IsNewPress(GameAction.MoveSouthEast, _currentState, _previousState))
+            return Action.MoveSouthEast;
+        if (_bindings.IsNewPress(GameAction.MoveSouthWest, _currentState, _previousState))
+            return Action.MoveSouthWest;
         if (_bindings.IsNewPress(GameAction.Interact, _currentState, _previousState))
             return Action.Interact;
         if (_bindings.IsNewPress(GameAction.Wait, _currentState, _previousState))
@@ -104,6 +116,10 @@ public class InputHandler
             Action.MoveSouth => TryMove(state, 0, 1),
             Action.MoveEast => TryMove(state, 1, 0),
             Action.MoveWest => TryMove(state, -1, 0),
+            Action.MoveNorthEast => TryMove(state, 1, -1),
+            Action.MoveNorthWest => TryMove(state, -1, -1),
+            Action.MoveSouthEast => TryMove(state, 1, 1),
+            Action.MoveSouthWest => TryMove(state, -1, 1),
             Action.Wait => Wait(state),
             Action.Interact => TryInteract(state),
             _ => false,
