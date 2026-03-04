@@ -12,11 +12,16 @@ namespace Game.Core.Map;
 /// TileDefs themselves are immutable and shared.
 ///
 /// Also owns the per-map lighting and visibility state:
-///   - Visibility : GoRogue FOV result (visible / explored per tile)
+///   - Visibility : FOV result (visible / explored per tile)
 ///   - Lighting   : LightMap accumulation (ambient + point sources)
 ///
 /// These are initialized lazily via InitializeLighting() so maps that
 /// don't need lighting (e.g. UI preview maps) stay cheap.
+///
+/// Height/opacity:
+///   - _heightMap      : raw elevation [0..1] stored by generators (overworld only)
+///   - GetTileHeight() : coarse 0-4 level from TileDef.Height (used by renderer arrows)
+///   - IsOpaque()      : drives FOW blocking -- walls/trees block, water/floor do NOT
 /// </summary>
 public class TileMap
 {
@@ -26,10 +31,55 @@ public class TileMap
     // Flat array for cache-friendly access; index = y * Width + x
     private readonly string[] _tileIds;
 
-    // Registry lookup — maps tile ID strings to TileDef objects
+    // Registry lookup -- maps tile ID strings to TileDef objects
     private readonly Dictionary<string, TileDef> _tileRegistry;
 
-    // ── Lighting / FOW ──────────────────────────────────────────────
+    // -- HeightMap ----------------------------------------------------
+    // Stores raw elevation values [0..1] from the noise generator.
+    // Used by TileRenderer to compute height arrows between neighbors.
+
+    private readonly float[] _heightMap;
+
+    /// <summary>
+    /// Raw elevation value for a tile (0..1). Set by generators during map creation.
+    /// Not the same as TileDef.Height (which is a coarse 0-4 logical level).
+    /// </summary>
+    public float GetElevation(int x, int y)
+        => InBounds(x, y) ? _heightMap[y * Width + x] : 0f;
+
+    /// <summary>Set raw elevation. Call during map generation.</summary>
+    public void SetElevation(int x, int y, float elevation)
+    {
+        if (InBounds(x, y))
+            _heightMap[y * Width + x] = elevation;
+    }
+
+    /// <summary>
+    /// Returns the logical height level (0-4) for a tile from TileDef.Height.
+    /// Falls back to 1 (flat) if tile is unknown.
+    /// </summary>
+    public int GetTileHeight(int x, int y)
+    {
+        if (!InBounds(x, y)) return 0;
+        var def = GetTile(x, y);
+        return def?.Height ?? 1;
+    }
+
+    /// <summary>
+    /// Returns true if the tile blocks line-of-sight for Fog-of-War.
+    /// Uses TileDef.BlocksSight.
+    ///   Walls, trees, mountains = opaque.
+    ///   Water, grass, floor, entrances = transparent.
+    /// Out-of-bounds positions are treated as opaque.
+    /// </summary>
+    public bool IsOpaque(int x, int y)
+    {
+        if (!InBounds(x, y)) return true;
+        var def = GetTile(x, y);
+        return def?.BlocksSight ?? false;
+    }
+
+    // -- Lighting / FOW -----------------------------------------------
 
     /// <summary>
     /// Fog-of-war visibility state. Null until InitializeLighting() is called.
@@ -43,7 +93,7 @@ public class TileMap
     /// </summary>
     public LightMap? Lighting { get; private set; }
 
-    // ── Construction ────────────────────────────────────────────────
+    // -- Construction -------------------------------------------------
 
     public TileMap(int width, int height, Dictionary<string, TileDef> tileRegistry)
     {
@@ -51,30 +101,32 @@ public class TileMap
         Height = height;
         _tileRegistry = tileRegistry;
         _tileIds = new string[width * height];
+        _heightMap = new float[width * height];
     }
 
-    // ── Lighting initialization ──────────────────────────────────────
+    // -- Lighting initialization --------------------------------------
 
     /// <summary>
     /// Set up the VisibilityMap and LightMap for this map instance.
     ///
     /// Must be called once after tile data is fully written (after generation),
-    /// because the FOV transparency view is built from the tile walkability state.
+    /// because the FOV transparency view is built from tile state.
     ///
-    /// <paramref name="ambientLight"> sets the starting ambient color for LightMap.
+    /// FOW blocking uses TileDef.BlocksSight, NOT walkability:
+    ///   - Walls, trees, mountains : opaque  (block sight)
+    ///   - Water                   : transparent (non-walkable but you can see across)
+    ///   - Grass, floor, entrances : transparent
+    ///
+    /// ambientLight sets the starting ambient color for LightMap.
     /// Use Color.White for fully lit maps (overworld daytime),
     /// Color.Black for pitch-dark dungeons.
     /// </summary>
     public void InitializeLighting(XnaColor ambientLight)
     {
-        // Transparency: a tile is see-through if it's walkable.
-        // Walls and water block LOS; floors, entrances, exits don't.
+        // IsOpaque() uses TileDef.BlocksSight -- NOT walkability.
+        // Water is non-walkable but transparent; the old walkable-only rule was wrong.
         Visibility = new VisibilityMap(Width, Height,
-            (x, y) =>
-            {
-                var tile = GetTile(x, y);
-                return tile?.Walkable ?? false;
-            });
+            (x, y) => !IsOpaque(x, y));
 
         Lighting = new LightMap(Width, Height)
         {
@@ -82,7 +134,7 @@ public class TileMap
         };
     }
 
-    // ── FOW convenience pass-throughs ────────────────────────────────
+    // -- FOW convenience pass-throughs --------------------------------
 
     /// <summary>True if the tile is currently in the player's FOV.</summary>
     public bool IsVisible(int x, int y) => Visibility?.IsVisible(x, y) ?? true;
@@ -90,13 +142,13 @@ public class TileMap
     /// <summary>True if the tile has ever been seen by the player.</summary>
     public bool IsExplored(int x, int y) => Visibility?.IsExplored(x, y) ?? true;
 
-    // ── Core tile API (unchanged) ────────────────────────────────────
+    // -- Core tile API ------------------------------------------------
 
     /// <summary>Check if coordinates are within map bounds.</summary>
     public bool InBounds(int x, int y)
         => x >= 0 && x < Width && y >= 0 && y < Height;
 
-    /// <summary>Get the TileDef at a position. Returns null if out of bounds.</summary>
+    /// <summary>Get the TileDef at a position. Returns null if out of bounds or unknown ID.</summary>
     public TileDef? GetTile(int x, int y)
     {
         if (!InBounds(x, y)) return null;

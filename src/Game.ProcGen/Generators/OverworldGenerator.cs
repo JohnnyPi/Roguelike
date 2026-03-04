@@ -80,6 +80,7 @@ public class OverworldGenerator
                 float elevation = (noise.GetNoise(x, y) + 1f) / 2f;
                 string tileId = ElevationToTileBiome(elevation, biomes);
                 map.SetTile(x, y, tileId);
+                map.SetElevation(x, y, elevation);
             }
         }
 
@@ -121,6 +122,7 @@ public class OverworldGenerator
                 float elevation = (noise.GetNoise(x, y) + 1f) / 2f;
                 string tileId = ElevationToTileLegacy(elevation);
                 map.SetTile(x, y, tileId);
+                map.SetElevation(x, y, elevation);
             }
         }
 

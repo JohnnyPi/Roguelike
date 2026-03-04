@@ -145,6 +145,8 @@ public sealed class ContentLoader
                         Walkable = yt.Walkable,
                         Color = yt.Color,
                         Sprite = yt.Sprite,
+                        BlocksSight = yt.BlocksSight,
+                        Height = yt.Height,
                         Tags = yt.Tags
                     };
 

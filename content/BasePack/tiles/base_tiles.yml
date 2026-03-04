@@ -5,6 +5,8 @@ tiles:
     walkable: true
     color: "#3A7D2C"
     sprite: ""
+    blocksSight: false
+    height: 1
     tags: [natural, overworld]
 
   - id: base:wall
@@ -12,6 +14,8 @@ tiles:
     walkable: false
     color: "#4A4A4A"
     sprite: ""
+    blocksSight: true
+    height: 3
     tags: [solid, blocking]
 
   - id: base:floor
@@ -19,6 +23,8 @@ tiles:
     walkable: true
     color: "#8B8B7A"
     sprite: ""
+    blocksSight: false
+    height: 1
     tags: [dungeon, constructed]
 
   - id: base:dirt
@@ -26,6 +32,8 @@ tiles:
     walkable: true
     color: "#7A6033"
     sprite: ""
+    blocksSight: false
+    height: 2
     tags: [natural, overworld]
 
   - id: base:water
@@ -33,13 +41,26 @@ tiles:
     walkable: false
     color: "#2255AA"
     sprite: ""
-    tags: [natural, liquid, blocking]
+    blocksSight: false
+    height: 0
+    tags: [natural, liquid]
+
+  - id: base:tree
+    name: "Tree"
+    walkable: false
+    color: "#1A5C10"
+    sprite: ""
+    blocksSight: true
+    height: 3
+    tags: [natural, overworld, blocking, vegetation]
 
   - id: base:dungeon_entrance
     name: "Dungeon Entrance"
     walkable: true
     color: "#AA3333"
     sprite: ""
+    blocksSight: false
+    height: 1
     tags: [transition, entrance]
 
   - id: base:dungeon_exit
@@ -47,4 +68,6 @@ tiles:
     walkable: true
     color: "#33AA33"
     sprite: ""
+    blocksSight: false
+    height: 1
     tags: [transition, exit]

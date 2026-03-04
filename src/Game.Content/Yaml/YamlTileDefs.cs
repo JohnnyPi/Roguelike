@@ -1,8 +1,4 @@
 // src/Game.Content/Yaml/YamlTileDefs.cs
-//
-// YamlDotNet deserialization models for tiles/*.yml files.
-// These are simple POCOs that map 1:1 to the YAML structure.
-// The loader converts them into Game.Core.Tiles.TileDef instances.
 
 using YamlDotNet.Serialization;
 
@@ -33,6 +29,14 @@ public sealed class YamlTileDef
 
     [YamlMember(Alias = "sprite")]
     public string Sprite { get; set; } = string.Empty;
+
+    /// <summary>Blocks FOW line-of-sight. Default false = transparent.</summary>
+    [YamlMember(Alias = "blocksSight")]
+    public bool BlocksSight { get; set; }
+
+    /// <summary>Logical height 0-4. Default 1 = flat ground.</summary>
+    [YamlMember(Alias = "height")]
+    public int Height { get; set; } = 1;
 
     [YamlMember(Alias = "tags")]
     public List<string> Tags { get; set; } = new();

@@ -29,17 +29,20 @@
 //   - Vignette warning overlay when HP < 30%
 //   - All panels only rebuild widgets when underlying data changes (cheap)
 
-using System;
-using System.Collections.Generic;
+using Game.Client.Input;
+using Game.Client.Rendering;
+using Game.Core;
+using Game.Core.Entities;
+using Game.Core.Items;
+using Game.Core.Map;
 using Microsoft.Xna.Framework;
+using Microsoft.Xna.Framework.Graphics;
 using Myra;
 using Myra.Graphics2D;
 using Myra.Graphics2D.Brushes;
 using Myra.Graphics2D.UI;
-using Game.Core;
-using Game.Core.Entities;
-using Game.Core.Items;
-using Game.Client.Input;
+using System;
+using System.Collections.Generic;
 
 #nullable enable
 
@@ -99,6 +102,11 @@ public sealed class HudManager
     //  Myra doesn't support radial gradients, so we use a full-screen semi-
     //  transparent border panel that appears only when HP < 30%.
     private readonly Panel _dangerVignette;
+
+    // ── Minimap ──────────────────────────────────────────────────────────────────
+    private const int MinimapSize = 160;     // total minimap panel pixel size
+    private const int MinimapBorder = 4;     // border padding inside panel
+    private const int MinimapTileMinPx = 1;  // minimum px per tile (1 = can show 120x120 map)
 
     public HudManager(InputBindings bindings)
     {
@@ -570,5 +578,76 @@ public sealed class HudManager
 
             _inventoryList.Widgets.Add(row);
         }
+    }
+
+    /// <summary>
+    /// Draw the minimap directly via SpriteBatch (called from Game1.Draw before spriteBatch.End).
+    /// Renders top-right corner below the mode panel.
+    /// Shows overworld or dungeon depending on current mode.
+    /// Explored tiles = dim, Visible tiles = full color, Player = white dot.
+    /// </summary>
+    public void DrawMinimap(SpriteBatch spriteBatch, GameState state, Texture2D pixel)
+    {
+        if (state?.ActiveMap == null || state.Player == null) return;
+
+        var map = state.ActiveMap;
+        int mapW = map.Width;
+        int mapH = map.Height;
+
+        // Compute px per tile to fit in MinimapSize
+        float tpx = Math.Min(
+            (MinimapSize - MinimapBorder * 2) / (float)mapW,
+            (MinimapSize - MinimapBorder * 2) / (float)mapH);
+        int tilePx = Math.Max(1, (int)tpx);
+
+        int drawW = mapW * tilePx;
+        int drawH = mapH * tilePx;
+
+        // Panel top-right, below mode indicator (~120px from top)
+        int viewport = spriteBatch.GraphicsDevice.Viewport.Width;
+        int panelX = viewport - drawW - MinimapBorder * 2 - 8;
+        int panelY = 120;
+
+        // Dark panel background
+        spriteBatch.Draw(pixel,
+            new Rectangle(panelX, panelY, drawW + MinimapBorder * 2, drawH + MinimapBorder * 2),
+            new Color(0, 0, 0, 200));
+
+        int ox = panelX + MinimapBorder;
+        int oy = panelY + MinimapBorder;
+
+        // Draw explored and visible tiles
+        for (int y = 0; y < mapH; y++)
+        {
+            for (int x = 0; x < mapW; x++)
+            {
+                bool vis = map.Visibility?.IsVisible(x, y) ?? true;
+                bool exp = map.Visibility?.IsExplored(x, y) ?? true;
+                if (!exp) continue;
+
+                var tileColor = ParseMinimapTileColor(map, x, y);
+                if (!vis) tileColor = new Color((int)(tileColor.R * 0.35f), (int)(tileColor.G * 0.35f), (int)(tileColor.B * 0.35f), 200);
+                else tileColor = new Color((int)tileColor.R, (int)tileColor.G, (int)tileColor.B, 255);
+
+                spriteBatch.Draw(pixel,
+                    new Rectangle(ox + x * tilePx, oy + y * tilePx, tilePx, tilePx),
+                    tileColor);
+            }
+        }
+
+        // Player dot — bright white, slightly larger than tile
+        int px = ox + state.Player.X * tilePx;
+        int py = oy + state.Player.Y * tilePx;
+        int dotSize = Math.Max(2, tilePx + 1);
+        spriteBatch.Draw(pixel,
+            new Rectangle(px - dotSize / 2, py - dotSize / 2, dotSize, dotSize),
+            Color.White);
+    }
+
+    private static Color ParseMinimapTileColor(TileMap map, int x, int y)
+    {
+        var def = map.GetTile(x, y);
+        if (def == null) return Color.Black;
+        return TileRenderer.ParseHexColor(def.Color);
     }
 }

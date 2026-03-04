@@ -213,13 +213,14 @@ public class Game1 : Microsoft.Xna.Framework.Game
 
         var tiles = new[]
         {
-            new TileDef { Id = "base:grass",           Name = "Grass",           Walkable = true,  Color = "#3A7D2C" },
-            new TileDef { Id = "base:wall",             Name = "Wall",            Walkable = false, Color = "#4A4A4A" },
-            new TileDef { Id = "base:floor",            Name = "Stone Floor",     Walkable = true,  Color = "#8B8B7A" },
-            new TileDef { Id = "base:dirt",             Name = "Dirt",            Walkable = true,  Color = "#7A6033" },
-            new TileDef { Id = "base:water",            Name = "Water",           Walkable = false, Color = "#2255AA" },
-            new TileDef { Id = "base:dungeon_entrance", Name = "Dungeon Entrance",Walkable = true,  Color = "#AA3333" },
-            new TileDef { Id = "base:dungeon_exit",     Name = "Dungeon Exit",    Walkable = true,  Color = "#33AA33" },
+            new TileDef { Id = "base:grass",            Name = "Grass",           Walkable = true,  Color = "#3A7D2C", BlocksSight = false, Height = 1, Tags = new() { "natural", "overworld" } },
+            new TileDef { Id = "base:wall",             Name = "Wall",            Walkable = false, Color = "#4A4A4A", BlocksSight = true,  Height = 3, Tags = new() { "solid", "blocking" } },
+            new TileDef { Id = "base:floor",            Name = "Stone Floor",     Walkable = true,  Color = "#8B8B7A", BlocksSight = false, Height = 1, Tags = new() { "dungeon", "constructed" } },
+            new TileDef { Id = "base:dirt",             Name = "Dirt",            Walkable = true,  Color = "#7A6033", BlocksSight = false, Height = 2, Tags = new() { "natural", "overworld" } },
+            new TileDef { Id = "base:water",            Name = "Water",           Walkable = false, Color = "#2255AA", BlocksSight = false, Height = 0, Tags = new() { "natural", "liquid" } },
+            new TileDef { Id = "base:tree",             Name = "Tree",            Walkable = false, Color = "#1A5C10", BlocksSight = true,  Height = 3, Tags = new() { "natural", "overworld", "blocking", "vegetation" } },
+            new TileDef { Id = "base:dungeon_entrance", Name = "Dungeon Entrance",Walkable = true,  Color = "#AA3333", BlocksSight = false, Height = 1, Tags = new() { "transition", "entrance" } },
+            new TileDef { Id = "base:dungeon_exit",     Name = "Dungeon Exit",    Walkable = true,  Color = "#33AA33", BlocksSight = false, Height = 1, Tags = new() { "transition", "exit" } },
         };
         foreach (var t in tiles) registry.RegisterTile(t);
 
@@ -383,6 +384,8 @@ public class Game1 : Microsoft.Xna.Framework.Game
                           : null;
 
         _renderer.Draw(_state, _camera, previewPath, _path.Destination);
+
+        _hud.DrawMinimap(_spriteBatch, _state, _renderer.Pixel);
 
         _spriteBatch.End();
 
