@@ -71,3 +71,21 @@ tiles:
     blocksSight: false
     height: 1
     tags: [transition, exit]
+    
+  - id: base:shallow_water
+    name: "Shallow Water"
+    walkable: false
+    color: "#3377CC"
+    sprite: ""
+    blocksSight: false
+    height: 0
+    tags: [natural, liquid, shallow, coastal]
+
+  - id: base:beach
+    name: "Beach"
+    walkable: true
+    color: "#C8B864"
+    sprite: ""
+    blocksSight: false
+    height: 1
+    tags: [natural, overworld, coastal]

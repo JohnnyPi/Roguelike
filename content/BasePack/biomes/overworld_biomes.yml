@@ -1,24 +1,36 @@
 # content/BasePack/biomes/overworld_biomes.yml
-# Biome definitions that map elevation ranges to tile types.
-# These were previously hardcoded as threshold constants in OverworldGenerator.cs.
-#
-# Biomes are sorted by elevationMax ascending. The generator walks
-# the list top-to-bottom and picks the first biome whose elevationMax
-# is above the sampled elevation. The last biome acts as the catch-all.
+# Biome definitions for island generation.
+# Sorted by elevationMax ascending. The island mask guarantees all
+# edge tiles have near-zero elevation, so they always fall into deep_water.
+# The two coastal biomes (shallow_water, beach) create layered shorelines.
 
 schema: biome_defs.v1
 biomes:
-  - id: base:water
+  - id: base:deep_water
     name: "Deep Water"
     tileId: base:water
-    elevationMax: 0.30
+    elevationMax: 0.22
     walkable: false
     tags: [natural, liquid]
+
+  - id: base:shallow_water
+    name: "Shallow Water"
+    tileId: base:shallow_water
+    elevationMax: 0.30
+    walkable: false
+    tags: [natural, liquid, shallow, coastal]
+
+  - id: base:beach
+    name: "Beach"
+    tileId: base:beach
+    elevationMax: 0.37
+    walkable: true
+    tags: [natural, coastal]
 
   - id: base:grassland
     name: "Grassland"
     tileId: base:grass
-    elevationMax: 0.55
+    elevationMax: 0.58
     walkable: true
     tags: [natural, temperate]
 

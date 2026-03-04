@@ -221,6 +221,8 @@ public class Game1 : Microsoft.Xna.Framework.Game
             new TileDef { Id = "base:tree",             Name = "Tree",            Walkable = false, Color = "#1A5C10", BlocksSight = true,  Height = 3, Tags = new() { "natural", "overworld", "blocking", "vegetation" } },
             new TileDef { Id = "base:dungeon_entrance", Name = "Dungeon Entrance",Walkable = true,  Color = "#AA3333", BlocksSight = false, Height = 1, Tags = new() { "transition", "entrance" } },
             new TileDef { Id = "base:dungeon_exit",     Name = "Dungeon Exit",    Walkable = true,  Color = "#33AA33", BlocksSight = false, Height = 1, Tags = new() { "transition", "exit" } },
+            new TileDef { Id = "base:shallow_water",    Name = "Shallow Water",   Walkable = false, Color = "#3A77CC", BlocksSight = false, Height = 0, Tags = new() { "natural", "liquid", "shallow", "coastal" } },
+            new TileDef { Id = "base:beach",            Name = "Beach",           Walkable = true,  Color = "#C8B864", BlocksSight = false, Height = 1, Tags = new() { "natural", "overworld", "coastal" } },
         };
         foreach (var t in tiles) registry.RegisterTile(t);
 

@@ -36,12 +36,10 @@ namespace Game.Client.Rendering;
 ///   - Explored, not visible : ~28% brightness with cool blue desaturation tint
 ///   - Visible             : full color multiplied by LightMap
 ///
-/// Height arrows (shown when ZoomedTileSize >= 16):
-///   Each visible tile gets a directional mark on each face showing the height
-///   relationship with that neighbor:
-///     Arrow pointing IN  = neighbor is lower  (ground slopes down that way)
-///     Arrow pointing OUT = neighbor is higher (ground slopes up that way)
-///     Flat line          = same height as neighbor
+//   Arrow pointing OUT = neighbor is HIGHER (sloping up that direction) -- detached arrowhead at face, pointing away from tile
+//   Arrow pointing IN  = neighbor is LOWER  (sloping down that direction) -- detached arrowhead at face, pointing toward tile center
+//   Nothing drawn      = same height as neighbor
+//   Only drawn on tiles within ~4 Chebyshev distance of the player
 /// </summary>
 public class TileRenderer
 {
@@ -60,7 +58,7 @@ public class TileRenderer
     private readonly Dictionary<string, Color> _colorCache = new();
 
     // Semi-transparent white used for height arrows
-    private static readonly Color ArrowColor = new Color(255, 255, 255, 90);
+    private static readonly Color ArrowColor = new Color(255, 255, 255, 140);
 
     public TileRenderer(GraphicsDevice graphicsDevice, SpriteBatch spriteBatch)
     {
@@ -158,7 +156,7 @@ public class TileRenderer
                 DrawTileBorder(screenX, screenY, ts, drawColor);
 
                 // Height arrows -- only when zoomed in enough to be readable
-                if (showArrows)
+                if (showArrows && IsNearPlayer(state, x, y, 4))
                     DrawHeightArrows(map, x, y, screenX, screenY, ts);
             }
         }
@@ -180,71 +178,87 @@ public class TileRenderer
     // -- Height arrow rendering ---------------------------------------
 
     /// <summary>
-    /// Draws slope indicators on a visible tile based on height vs each of its 4 neighbors.
+    /// Returns true if tile (tx,ty) is within <radius> tiles of the player (Chebyshev distance).
+    /// </summary>
+    private static bool IsNearPlayer(GameState state, int tx, int ty, int radius)
+    {
+        var p = state.Player;
+        if (p == null) return false;
+        return Math.Abs(tx - p.X) <= radius && Math.Abs(ty - p.Y) <= radius;
+    }
+
+    /// <summary>
+    /// Draws detached arrowhead slope indicators near each face of a tile.
     ///
-    /// Each face gets one of:
-    ///   Arrow pointing inward  = neighbor is LOWER  (you'd walk downhill that way)
-    ///   Arrow pointing outward = neighbor is HIGHER (you'd walk uphill that way)
-    ///   Short flat line        = same height as neighbor
+    /// Sloping UP toward neighbor   -> arrowhead points OUTWARD (away from tile center)
+    /// Sloping DOWN toward neighbor -> arrowhead points INWARD  (toward tile center)
+    /// Same height                  -> nothing drawn
     ///
-    /// Arrows are semi-transparent white so they read on any tile color.
-    /// Only called when ts >= 16.
+    /// Arrows are drawn as a detached "V" near the tile edge -- no shaft from center.
+    /// Only called for tiles near the player and when ts >= 16.
     /// </summary>
     private void DrawHeightArrows(TileMap map, int tx, int ty,
                                   int screenX, int screenY, int ts)
     {
         int myH = map.GetTileHeight(tx, ty);
 
+        int tipLen = Math.Max(2, ts / 7);   // arm length of the V
+        int margin = Math.Max(3, ts / 6);   // distance from tile edge to arrowhead tip
         int cx = screenX + ts / 2;
         int cy = screenY + ts / 2;
-        int reach = Math.Max(3, ts / 4); // shaft length from center to face point
-        int tipLen = Math.Max(2, ts / 8); // arrowhead arm length
 
-        // North
-        DrawFaceArrow(cx, cy, cx, screenY + reach,
-                      myH, map.GetTileHeight(tx, ty - 1), tipLen, isVertical: true);
-        // South
-        DrawFaceArrow(cx, cy, cx, screenY + ts - reach,
-                      myH, map.GetTileHeight(tx, ty + 1), tipLen, isVertical: true);
-        // West
-        DrawFaceArrow(cx, cy, screenX + reach, cy,
-                      myH, map.GetTileHeight(tx - 1, ty), tipLen, isVertical: false);
-        // East
-        DrawFaceArrow(cx, cy, screenX + ts - reach, cy,
-                      myH, map.GetTileHeight(tx + 1, ty), tipLen, isVertical: false);
+        // North face
+        DrawDetachedArrow(cx, screenY + margin,
+                          myH, map.GetTileHeight(tx, ty - 1),
+                          tipLen, dx: 1, dy: 0, outDy: -1, outDx: 0);
+        // South face
+        DrawDetachedArrow(cx, screenY + ts - margin,
+                          myH, map.GetTileHeight(tx, ty + 1),
+                          tipLen, dx: 1, dy: 0, outDy: 1, outDx: 0);
+        // West face
+        DrawDetachedArrow(screenX + margin, cy,
+                          myH, map.GetTileHeight(tx - 1, ty),
+                          tipLen, dx: 0, dy: 1, outDy: 0, outDx: -1);
+        // East face
+        DrawDetachedArrow(screenX + ts - margin, cy,
+                          myH, map.GetTileHeight(tx + 1, ty),
+                          tipLen, dx: 0, dy: 1, outDy: 0, outDx: 1);
     }
 
     /// <summary>
-    /// Draws one directional indicator from tile center (cx,cy) toward a face point (fx,fy).
+    /// Draws a single detached arrowhead at position (ax, ay) facing inward or outward.
     ///
-    /// Same height   -> flat line only, no arrowhead
-    /// Lower neighbor -> arrowhead at face point  (descending toward that neighbor)
-    /// Higher neighbor -> arrowhead at center     (ascending from center toward face)
+    /// Parameters:
+    ///   ax, ay      -- position of the arrowhead tip
+    ///   myH         -- height of the current tile
+    ///   neighborH   -- height of the neighbor tile on this face
+    ///   tipLen      -- half-width of the V arms
+    ///   dx, dy      -- unit vector ALONG the face edge (perpendicular to outward normal)
+    ///   outDx, outDy -- unit vector pointing OUTWARD from tile (toward the neighbor)
+    ///
+    /// Sloping UP   (neighborH > myH): tip points outward, arms point inward
+    /// Sloping DOWN (neighborH < myH): tip points inward,  arms point outward
     /// </summary>
-    private void DrawFaceArrow(int cx, int cy, int fx, int fy,
-                                int myH, int neighborH, int tipLen, bool isVertical)
+    private void DrawDetachedArrow(int ax, int ay,
+                                   int myH, int neighborH, int tipLen,
+                                   int dx, int dy, int outDx, int outDy)
     {
-        // Always draw the shaft from center to face
-        DrawLine(cx, cy, fx, fy, ArrowColor);
+        if (neighborH == myH) return; // flat -- nothing to draw
 
-        if (neighborH == myH) return; // flat, no arrowhead needed
+        bool slopingUp = neighborH > myH;
 
-        // tipX/tipY = where the arrowhead point sits
-        int tipX = (neighborH < myH) ? fx : cx; // lower neighbor: tip at face; higher: tip at center
-        int tipY = (neighborH < myH) ? fy : cy;
+        // For OUTWARD arrow (sloping up): tip is the outermost point, arms go back inward
+        // For INWARD arrow (sloping down): tip is inward, arms spread outward at the edge
+        int armDir = slopingUp ? -1 : 1; // arms go opposite to outDx/outDy from tip
+        int armOffset = tipLen;           // how far arms spread along the face axis
 
-        if (isVertical)
-        {
-            int dir = Math.Sign(cy - tipY == 0 ? fy - cy : cy - tipY);
-            DrawLine(tipX, tipY, tipX - tipLen, tipY + dir * tipLen, ArrowColor);
-            DrawLine(tipX, tipY, tipX + tipLen, tipY + dir * tipLen, ArrowColor);
-        }
-        else
-        {
-            int dir = Math.Sign(cx - tipX == 0 ? fx - cx : cx - tipX);
-            DrawLine(tipX, tipY, tipX + dir * tipLen, tipY - tipLen, ArrowColor);
-            DrawLine(tipX, tipY, tipX + dir * tipLen, tipY + tipLen, ArrowColor);
-        }
+        // Arm base: step back from tip along the outward axis
+        int bx = ax + outDx * armDir * tipLen;
+        int by = ay + outDy * armDir * tipLen;
+
+        // Left arm and right arm spread perpendicular to the outward direction
+        DrawLine(ax, ay, bx - dx * armOffset, by - dy * armOffset, ArrowColor);
+        DrawLine(ax, ay, bx + dx * armOffset, by + dy * armOffset, ArrowColor);
     }
 
     /// <summary>
