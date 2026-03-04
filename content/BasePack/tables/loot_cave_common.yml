@@ -1,8 +1,17 @@
 # content/BasePack/tables/loot_cave_common.yml
+# Loot table for common cave item drops.
+# References existing item defs by ID.
+
 schema: loot_table.v1
 id: base:loot_cave_common
+name: "Common Cave Loot"
+tags: [cave, earlygame]
 entries:
   - id: base:gold_coin
     weight: 60
+    countMin: 1
+    countMax: 5
   - id: base:health_potion
     weight: 40
+    countMin: 1
+    countMax: 2

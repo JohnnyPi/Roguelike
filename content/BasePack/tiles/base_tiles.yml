@@ -1,0 +1,50 @@
+schema: tile_defs.v1
+tiles:
+  - id: base:grass
+    name: "Grass"
+    walkable: true
+    color: "#3A7D2C"
+    sprite: ""
+    tags: [natural, overworld]
+
+  - id: base:wall
+    name: "Wall"
+    walkable: false
+    color: "#4A4A4A"
+    sprite: ""
+    tags: [solid, blocking]
+
+  - id: base:floor
+    name: "Stone Floor"
+    walkable: true
+    color: "#8B8B7A"
+    sprite: ""
+    tags: [dungeon, constructed]
+
+  - id: base:dirt
+    name: "Dirt"
+    walkable: true
+    color: "#7A6033"
+    sprite: ""
+    tags: [natural, overworld]
+
+  - id: base:water
+    name: "Water"
+    walkable: false
+    color: "#2255AA"
+    sprite: ""
+    tags: [natural, liquid, blocking]
+
+  - id: base:dungeon_entrance
+    name: "Dungeon Entrance"
+    walkable: true
+    color: "#AA3333"
+    sprite: ""
+    tags: [transition, entrance]
+
+  - id: base:dungeon_exit
+    name: "Dungeon Exit"
+    walkable: true
+    color: "#33AA33"
+    sprite: ""
+    tags: [transition, exit]

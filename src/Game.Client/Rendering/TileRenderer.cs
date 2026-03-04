@@ -28,7 +28,7 @@ public class TileRenderer
     {
         _spriteBatch = spriteBatch;
 
-        // Create a 1x1 white pixel texture � the foundation of all our vector drawing.
+        // Create a 1x1 white pixel texture — the foundation of all our vector drawing.
         // We scale and tint this to draw any colored rectangle.
         _pixel = new Texture2D(graphicsDevice, 1, 1);
         _pixel.SetData(new[] { Color.White });
@@ -117,9 +117,13 @@ public class TileRenderer
             {
                 DrawChest(screenPos, chest);
             }
+            else if (entity is Enemy enemy)
+            {
+                DrawEnemy(screenPos, enemy);
+            }
             else
             {
-                // Generic entity (enemies in Phase 6): red square
+                // Generic entity fallback: red square
                 int inset = 4;
                 _spriteBatch.Draw(
                     _pixel,
@@ -133,6 +137,88 @@ public class TileRenderer
                 );
             }
         }
+    }
+
+    /// <summary>
+    /// Draw an enemy as a colored square with a small HP bar underneath.
+    /// Color comes from the MonsterDef. Slightly different shape from the player
+    /// to be visually distinguishable.
+    /// </summary>
+    private void DrawEnemy(Vector2 screenPos, Enemy enemy)
+    {
+        var color = GetEnemyColor(enemy);
+        int inset = 4;
+        int x = (int)screenPos.X;
+        int y = (int)screenPos.Y;
+
+        // Enemy body — slightly rounded look via layered rectangles
+        // Outer body
+        _spriteBatch.Draw(
+            _pixel,
+            new Rectangle(
+                x + inset,
+                y + inset,
+                TileSize - inset * 2,
+                TileSize - inset * 2
+            ),
+            color
+        );
+
+        // Inner highlight (darker) to distinguish from items
+        var darkerColor = new Color(
+            (int)(color.R * 0.6f),
+            (int)(color.G * 0.6f),
+            (int)(color.B * 0.6f)
+        );
+        int innerInset = 8;
+        _spriteBatch.Draw(
+            _pixel,
+            new Rectangle(
+                x + innerInset,
+                y + innerInset,
+                TileSize - innerInset * 2,
+                TileSize - innerInset * 2
+            ),
+            darkerColor
+        );
+
+        // Small HP bar at the bottom of the tile (only if damaged)
+        if (enemy.Hp < enemy.MaxHp)
+        {
+            int barWidth = TileSize - inset * 2;
+            int barHeight = 3;
+            int barY = y + TileSize - inset - barHeight;
+            int barX = x + inset;
+
+            // Background (dark)
+            _spriteBatch.Draw(_pixel,
+                new Rectangle(barX, barY, barWidth, barHeight),
+                new Color(40, 40, 40));
+
+            // Fill (red to green based on HP %)
+            float hpPct = (float)enemy.Hp / enemy.MaxHp;
+            int fillWidth = Math.Max(1, (int)(barWidth * hpPct));
+            var hpColor = hpPct > 0.5f
+                ? new Color(50, 200, 50)
+                : new Color(220, 50, 50);
+            _spriteBatch.Draw(_pixel,
+                new Rectangle(barX, barY, fillWidth, barHeight),
+                hpColor);
+        }
+    }
+
+    /// <summary>
+    /// Get the display color for an enemy, parsed from its MonsterDef.
+    /// </summary>
+    private Color GetEnemyColor(Enemy enemy)
+    {
+        var key = $"enemy:{enemy.Def.Id}";
+        if (_colorCache.TryGetValue(key, out var cached))
+            return cached;
+
+        var color = ParseHexColor(enemy.Def.Color);
+        _colorCache[key] = color;
+        return color;
     }
 
     /// <summary>

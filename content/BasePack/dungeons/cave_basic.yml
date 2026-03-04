@@ -1,10 +1,13 @@
 # content/BasePack/dungeons/cave_basic.yml
+# Basic cave dungeon blueprint (Phase A — config only, not full pipeline yet).
+# Values here replace the hardcoded properties in DungeonGenerator
+# and the magic numbers in Game1.EnterDungeon().
+
 schema: dungeon_blueprint.v1
 id: base:cave_basic
 name: "Basic Cave"
 tags: [cave, natural, earlygame]
-requires:
-  - base:tileset_cave
+requires: []
 
 defaults:
   seedSalt: "cave_basic"
@@ -16,42 +19,32 @@ defaults:
 
   size:
     grid:
-      widthMin: 60
-      widthMax: 60
-      heightMin: 40
-      heightMax: 40
-    targetFloorRatioMin: 0.30
-    targetFloorRatioMax: 0.50
+      widthMin: 50
+      widthMax: 70
+      heightMin: 35
+      heightMax: 45
+    targetFloorRatioMin: 0.28
+    targetFloorRatioMax: 0.45
 
   rooms:
-    countMin: 6
-    countMax: 12
-    widthMin: 5
-    widthMax: 10
-    heightMin: 5
-    heightMax: 10
+    minRooms: 6
+    maxRooms: 12
+    roomMinSize: 5
+    roomMaxSize: 10
+    maxPlacementAttempts: 200
 
   connectivity:
     mustBeConnected: true
-    corridorStyle: "l_shaped"
+    allowLoops: true
+    loopChance: 0.25
 
   entranceExit:
     requireEntrance: true
-    requireExit: false
+    requireExit: true
+    preferFarthestExit: true
 
-population:
-  monsterTableId: base:spawn_cave_monsters
-  itemTableId: base:loot_cave_common
-  itemRolls:
-    min: 2
-    max: 5
-  chestCount:
-    min: 1
-    max: 3
-
-validation:
-  maxAttempts: 30
-  onFail: regen
-  assertions:
-    - id: connected
-      kind: must_be_connected
+  population:
+    itemsPerRoom: "0..2"
+    chestChance: 0.40
+    monsterTableId: base:spawn_cave_monsters
+    itemTableId: base:loot_cave_common

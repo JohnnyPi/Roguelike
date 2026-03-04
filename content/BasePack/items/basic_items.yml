@@ -1,17 +1,22 @@
 # content/BasePack/items/basic_items.yml
+# Starter item definitions for the base pack.
+# These were previously hardcoded in Game1.BuildItemDefs().
+
 schema: item_defs.v1
+
 items:
   - id: base:gold_coin
     name: "Gold Coin"
     tags: [currency, common]
     stackable: true
     maxStack: 99
+    color: "#FFD700"
 
   - id: base:health_potion
     name: "Health Potion"
     tags: [consumable, healing]
     stackable: true
     maxStack: 10
-    effect:
-      type: heal
-      amount: 15
+    effectType: heal
+    effectAmount: 15
+    color: "#FF4444"

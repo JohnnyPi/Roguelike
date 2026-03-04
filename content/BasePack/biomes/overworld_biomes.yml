@@ -1,0 +1,37 @@
+# content/BasePack/biomes/overworld_biomes.yml
+# Biome definitions that map elevation ranges to tile types.
+# These were previously hardcoded as threshold constants in OverworldGenerator.cs.
+#
+# Biomes are sorted by elevationMax ascending. The generator walks
+# the list top-to-bottom and picks the first biome whose elevationMax
+# is above the sampled elevation. The last biome acts as the catch-all.
+
+schema: biome_defs.v1
+biomes:
+  - id: base:water
+    name: "Deep Water"
+    tileId: base:water
+    elevationMax: 0.30
+    walkable: false
+    tags: [natural, liquid]
+
+  - id: base:grassland
+    name: "Grassland"
+    tileId: base:grass
+    elevationMax: 0.55
+    walkable: true
+    tags: [natural, temperate]
+
+  - id: base:dirt_hills
+    name: "Dirt Hills"
+    tileId: base:dirt
+    elevationMax: 0.75
+    walkable: true
+    tags: [natural, highland]
+
+  - id: base:mountains
+    name: "Mountains"
+    tileId: base:wall
+    elevationMax: 1.00
+    walkable: false
+    tags: [natural, impassable]

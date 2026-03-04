@@ -57,7 +57,7 @@ public class InputHandler
         _previousState = _currentState;
         _currentState = Keyboard.GetState();
 
-        // Movement � WASD and arrow keys
+        // Movement — WASD and arrow keys
         if (IsNewPress(Keys.W) || IsNewPress(Keys.Up))
             return Action.MoveNorth;
         if (IsNewPress(Keys.S) || IsNewPress(Keys.Down))
@@ -118,12 +118,17 @@ public class InputHandler
         if (state.ActiveMap == null || !state.ActiveMap.IsWalkable(newX, newY))
             return false;
 
-        // Check for blocking entity (this is how bump-attack works)
+        // Check for blocking entity — this is how bump-attack works
         var blocker = state.GetBlockingEntityAt(newX, newY);
         if (blocker != null && blocker != player)
         {
-            // Phase 6 will add combat here.
-            // For now, just log and consume the turn.
+            // If it's an enemy, attack it
+            if (blocker is Enemy enemy)
+            {
+                return AttackEnemy(state, player, enemy);
+            }
+
+            // Non-enemy blocker (chest, etc.) — can't walk through
             state.Log($"Something blocks your path at ({newX}, {newY}).");
             return true;
         }
@@ -135,6 +140,31 @@ public class InputHandler
         TryPickupItems(state);
 
         return true;
+    }
+
+    /// <summary>
+    /// Resolve a player attack against an enemy.
+    /// Damage = player.Attack - enemy.Defense (minimum 1).
+    /// </summary>
+    private bool AttackEnemy(GameState state, Player player, Enemy enemy)
+    {
+        int damage = enemy.TakeDamage(player.Attack);
+
+        if (enemy.IsDead)
+        {
+            state.Log($"You hit {enemy.Name} for {damage} damage — killed!");
+            enemy.IsAlive = false;
+        }
+        else
+        {
+            state.Log($"You hit {enemy.Name} for {damage} damage. ({enemy.Hp}/{enemy.MaxHp} HP)");
+
+            // Provoke passive enemies when attacked
+            if (!enemy.IsProvoked)
+                enemy.IsProvoked = true;
+        }
+
+        return true; // attack always consumes a turn
     }
 
     /// <summary>
@@ -167,7 +197,6 @@ public class InputHandler
     /// Attempt to interact with whatever is at the player's position or adjacent.
     /// Transition tiles: must be standing on them.
     /// Chests: must be adjacent (1 tile away in cardinal direction).
-    /// Phase 5 adds chest opening.
     /// </summary>
     private bool TryInteract(GameState state)
     {
@@ -186,7 +215,7 @@ public class InputHandler
             return true;
         }
 
-        // Standing on dungeon_entrance while IN the dungeon — this is the entry point, 
+        // Standing on dungeon_entrance while IN the dungeon — this is the entry point,
         // not an exit. Let the player know.
         if (tileId == "base:dungeon_entrance" && state.Mode == GameMode.Dungeon)
         {

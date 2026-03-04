@@ -6,28 +6,25 @@ using Game.Core.Map;
 using Game.Core.Tiles;
 using Game.Core.Items;
 using Game.Core.Entities;
+using Game.Core.Monsters;
 
 namespace Game.ProcGen.Generators;
 
 /// <summary>
-/// Rooms-and-corridors dungeon generator (Phase 2).
+/// Rooms-and-corridors dungeon generator.
 /// 
 /// Algorithm:
 ///   1. Fill grid with walls
 ///   2. Place 6–12 non-overlapping rectangular rooms (5–10 tiles each side)
 ///   3. Connect rooms with L-shaped corridors
 ///   4. Flood-fill to verify all floor tiles are reachable
-///   5. Mark an entrance tile in the first room
-///   
-/// This is the first generator kind in the blueprint pipeline.
-/// Later, the blueprint interpreter will select this (or BSP, cellular, etc.)
-/// based on the dungeon YAML definition.
+///   5. Mark entrance/exit tiles
+///   6. Place items, chests, and enemies
 /// </summary>
 public class DungeonGenerator
 {
     // ── Configuration defaults ──────────────────────────────────────
     // These will eventually come from a dungeon blueprint YAML file.
-    // Hardcoded here for the Phase 2 first pass.
 
     public int MapWidth { get; init; } = 60;
     public int MapHeight { get; init; } = 40;
@@ -37,7 +34,7 @@ public class DungeonGenerator
     public int RoomMaxSize { get; init; } = 10;
     public int MaxPlacementAttempts { get; init; } = 200;
 
-    // ── Tile IDs (match the tile registry in Game1) ─────────────────
+    // ── Tile IDs (match the tile registry) ─────────────────────────
     private const string WallTile = "base:wall";
     private const string FloorTile = "base:floor";
     private const string EntranceTile = "base:dungeon_entrance";
@@ -51,22 +48,17 @@ public class DungeonGenerator
     /// <summary>Grid position of the dungeon entrance (first room center).</summary>
     public (int X, int Y) EntrancePosition { get; private set; }
 
-    /// <summary>Grid position of the dungeon exit (last room center). Leads back to overworld.</summary>
+    /// <summary>Grid position of the dungeon exit (last room center).</summary>
     public (int X, int Y) ExitPosition { get; private set; }
 
     /// <summary>
-    /// Entities spawned during generation (WorldItems, Chests).
+    /// Entities spawned during generation (WorldItems, Chests, Enemies).
     /// Game1 should add these to GameState.Entities after generating.
     /// </summary>
     public List<Entity> SpawnedEntities { get; private set; } = new();
 
     // ── Room helper struct ──────────────────────────────────────────
 
-    /// <summary>
-    /// A rectangular room in the dungeon.
-    /// X,Y is the top-left corner; Width,Height are the full dimensions
-    /// including the room's own walls (the carve area is 1 tile inset).
-    /// </summary>
     public readonly struct Room
     {
         public int X { get; }
@@ -74,21 +66,13 @@ public class DungeonGenerator
         public int Width { get; }
         public int Height { get; }
 
-        /// <summary>Center tile of the room (used for corridor connections).</summary>
         public (int X, int Y) Center => (X + Width / 2, Y + Height / 2);
 
         public Room(int x, int y, int width, int height)
         {
-            X = x;
-            Y = y;
-            Width = width;
-            Height = height;
+            X = x; Y = y; Width = width; Height = height;
         }
 
-        /// <summary>
-        /// Check if this room overlaps another, with a 1-tile padding
-        /// so rooms never share walls or touch directly.
-        /// </summary>
         public bool Overlaps(Room other, int padding = 1)
         {
             return X - padding < other.X + other.Width
@@ -104,11 +88,11 @@ public class DungeonGenerator
     /// Generate a complete dungeon TileMap.
     /// </summary>
     /// <param name="tileRegistry">Tile definitions (needed by TileMap constructor).</param>
-    /// <param name="seed">Random seed for reproducible generation. Null = random.</param>
-    /// <param name="itemDefs">Available item definitions for loot placement. Null = no items.</param>
-    /// <returns>A fully carved TileMap ready for gameplay.</returns>
+    /// <param name="seed">Random seed for reproducible generation.</param>
+    /// <param name="itemDefs">Available item definitions for loot placement.</param>
+    /// <param name="monsterDefs">Available monster definitions for enemy spawning.</param>
     public TileMap Generate(Dictionary<string, TileDef> tileRegistry, int? seed = null,
-        List<ItemDef>? itemDefs = null)
+        List<ItemDef>? itemDefs = null, List<MonsterDef>? monsterDefs = null)
     {
         var rng = seed.HasValue ? new Random(seed.Value) : new Random();
         var map = new TileMap(MapWidth, MapHeight, tileRegistry);
@@ -128,7 +112,7 @@ public class DungeonGenerator
         // Step 4: Connect rooms with L-shaped corridors
         ConnectRooms(map, rng);
 
-        // Step 5: Verify connectivity — if not fully connected, add rescue corridors
+        // Step 5: Verify connectivity
         EnsureConnectivity(map, rng);
 
         // Step 6: Mark the entrance in the first room's center
@@ -136,10 +120,9 @@ public class DungeonGenerator
         EntrancePosition = entrance;
         map.SetTile(entrance.X, entrance.Y, EntranceTile);
 
-        // Step 7: Mark the exit in the last room's center (returns to overworld)
+        // Step 7: Mark the exit in the last room's center
         var exitRoom = Rooms[Rooms.Count - 1];
         var exit = exitRoom.Center;
-        // If only one room, offset the exit so it doesn't overlap the entrance
         if (Rooms.Count == 1)
         {
             exit = (exitRoom.X + 1, exitRoom.Y + 1);
@@ -147,22 +130,31 @@ public class DungeonGenerator
         ExitPosition = exit;
         map.SetTile(exit.X, exit.Y, ExitTile);
 
-        // Step 8: Place items and chests in rooms (if item defs are provided)
+        // Step 8: Place items, chests, and enemies
         SpawnedEntities = new List<Entity>();
         if (itemDefs != null && itemDefs.Count > 0)
         {
             PlaceItemsAndChests(map, rng, itemDefs);
         }
+        if (monsterDefs != null && monsterDefs.Count > 0)
+        {
+            PlaceEnemies(map, rng, monsterDefs);
+        }
 
         return map;
     }
 
+    // ── Backwards-compatible overload (no monsters) ─────────────────
+
+    /// <summary>Legacy overload without monster defs. Calls the full version with null monsters.</summary>
+    public TileMap Generate(Dictionary<string, TileDef> tileRegistry, int? seed,
+        List<ItemDef> itemDefs)
+    {
+        return Generate(tileRegistry, seed, itemDefs, null);
+    }
+
     // ── Room placement ──────────────────────────────────────────────
 
-    /// <summary>
-    /// Try to place between MinRooms and MaxRooms non-overlapping rooms.
-    /// Uses rejection sampling: pick random position/size, discard if overlapping.
-    /// </summary>
     private List<Room> PlaceRooms(Random rng)
     {
         int targetRooms = rng.Next(MinRooms, MaxRooms + 1);
@@ -172,8 +164,6 @@ public class DungeonGenerator
         {
             int w = rng.Next(RoomMinSize, RoomMaxSize + 1);
             int h = rng.Next(RoomMinSize, RoomMaxSize + 1);
-
-            // Keep rooms 1 tile away from map edges so the border stays solid wall
             int x = rng.Next(1, MapWidth - w - 1);
             int y = rng.Next(1, MapHeight - h - 1);
 
@@ -198,10 +188,6 @@ public class DungeonGenerator
         return rooms;
     }
 
-    /// <summary>
-    /// Carve floor tiles into the map for a room's interior.
-    /// The room's full rectangle becomes floor (no inset — rooms ARE the floor area).
-    /// </summary>
     private void CarveRoom(TileMap map, Room room)
     {
         for (int y = room.Y; y < room.Y + room.Height; y++)
@@ -213,11 +199,6 @@ public class DungeonGenerator
 
     // ── Corridor carving ────────────────────────────────────────────
 
-    /// <summary>
-    /// Connect each room to the next room in the list using L-shaped corridors.
-    /// This guarantees a spanning path through all rooms.
-    /// Randomly chooses horizontal-first or vertical-first for variety.
-    /// </summary>
     private void ConnectRooms(TileMap map, Random rng)
     {
         for (int i = 0; i < Rooms.Count - 1; i++)
@@ -225,7 +206,6 @@ public class DungeonGenerator
             var (x1, y1) = Rooms[i].Center;
             var (x2, y2) = Rooms[i + 1].Center;
 
-            // Randomly choose: horizontal then vertical, or vertical then horizontal
             if (rng.Next(2) == 0)
             {
                 CarveHorizontalTunnel(map, x1, x2, y1);
@@ -239,12 +219,10 @@ public class DungeonGenerator
         }
     }
 
-    /// <summary>Carve a horizontal line of floor tiles from x1 to x2 at row y.</summary>
     private void CarveHorizontalTunnel(TileMap map, int x1, int x2, int y)
     {
         int start = Math.Min(x1, x2);
         int end = Math.Max(x1, x2);
-
         for (int x = start; x <= end; x++)
         {
             if (map.InBounds(x, y))
@@ -252,12 +230,10 @@ public class DungeonGenerator
         }
     }
 
-    /// <summary>Carve a vertical line of floor tiles from y1 to y2 at column x.</summary>
     private void CarveVerticalTunnel(TileMap map, int y1, int y2, int x)
     {
         int start = Math.Min(y1, y2);
         int end = Math.Max(y1, y2);
-
         for (int y = start; y <= end; y++)
         {
             if (map.InBounds(x, y))
@@ -267,14 +243,8 @@ public class DungeonGenerator
 
     // ── Connectivity verification ───────────────────────────────────
 
-    /// <summary>
-    /// Flood-fill from the first floor tile found. If any floor tiles remain
-    /// unreached, connect the closest unreached tile to the reached set
-    /// with a corridor, then re-verify. Repeat until fully connected.
-    /// </summary>
     private void EnsureConnectivity(TileMap map, Random rng)
     {
-        // Find all floor tiles
         var allFloors = new HashSet<(int X, int Y)>();
         for (int y = 0; y < MapHeight; y++)
             for (int x = 0; x < MapWidth; x++)
@@ -286,18 +256,15 @@ public class DungeonGenerator
 
         if (allFloors.Count == 0) return;
 
-        // Flood-fill from the first floor tile
         var start = allFloors.GetEnumerator();
         start.MoveNext();
         var reached = FloodFill(map, start.Current.X, start.Current.Y);
 
-        // Keep connecting until everything is reachable
-        int maxRepairs = 50; // safety limit
+        int maxRepairs = 50;
         int repairs = 0;
 
         while (reached.Count < allFloors.Count && repairs < maxRepairs)
         {
-            // Find the closest unreached floor tile to any reached tile
             (int ux, int uy) unreachedTile = default;
             (int rx, int ry) reachedTile = default;
             int bestDist = int.MaxValue;
@@ -305,7 +272,6 @@ public class DungeonGenerator
             foreach (var floor in allFloors)
             {
                 if (reached.Contains(floor)) continue;
-
                 foreach (var r in reached)
                 {
                     int dist = Math.Abs(floor.X - r.X) + Math.Abs(floor.Y - r.Y);
@@ -318,7 +284,6 @@ public class DungeonGenerator
                 }
             }
 
-            // Carve a rescue corridor between them
             if (rng.Next(2) == 0)
             {
                 CarveHorizontalTunnel(map, reachedTile.rx, unreachedTile.ux, reachedTile.ry);
@@ -330,16 +295,11 @@ public class DungeonGenerator
                 CarveHorizontalTunnel(map, reachedTile.rx, unreachedTile.ux, unreachedTile.uy);
             }
 
-            // Re-flood from the start to pick up newly connected areas
             reached = FloodFill(map, start.Current.X, start.Current.Y);
             repairs++;
         }
     }
 
-    /// <summary>
-    /// BFS flood-fill from a starting position.
-    /// Returns the set of all reachable floor/entrance tiles.
-    /// </summary>
     private HashSet<(int X, int Y)> FloodFill(TileMap map, int startX, int startY)
     {
         var visited = new HashSet<(int, int)>();
@@ -348,14 +308,12 @@ public class DungeonGenerator
         queue.Enqueue((startX, startY));
         visited.Add((startX, startY));
 
-        // 4-directional neighbors
         int[] dx = { 0, 0, 1, -1 };
         int[] dy = { 1, -1, 0, 0 };
 
         while (queue.Count > 0)
         {
             var (cx, cy) = queue.Dequeue();
-
             for (int i = 0; i < 4; i++)
             {
                 int nx = cx + dx[i];
@@ -378,23 +336,12 @@ public class DungeonGenerator
 
     // ── Item and Chest Placement ────────────────────────────────────
 
-    /// <summary>
-    /// Place ground items and chests throughout the dungeon rooms.
-    /// Skips the entrance room (room 0) and exit room (last room)
-    /// to keep those clear for navigation.
-    /// 
-    /// Placement rules:
-    ///   - Each eligible room gets 0-2 ground items
-    ///   - Each eligible room has a 40% chance of a chest
-    ///   - Items/chests only placed on floor tiles not occupied by entrance/exit
-    /// </summary>
     private void PlaceItemsAndChests(TileMap map, Random rng, List<ItemDef> itemDefs)
     {
         for (int r = 0; r < Rooms.Count; r++)
         {
             var room = Rooms[r];
 
-            // Collect valid floor positions in this room (not entrance/exit tiles)
             var validPositions = new List<(int X, int Y)>();
             for (int y = room.Y; y < room.Y + room.Height; y++)
             {
@@ -437,6 +384,63 @@ public class DungeonGenerator
                 var chest = new Chest(lootDef, lootCount);
                 chest.SetPosition(pos.X, pos.Y);
                 SpawnedEntities.Add(chest);
+            }
+        }
+    }
+
+    // ── Enemy Placement ─────────────────────────────────────────────
+
+    /// <summary>
+    /// Place enemies throughout the dungeon rooms.
+    /// Skips the entrance room (room 0) to give the player a safe start.
+    /// Each eligible room gets 1-2 enemies chosen randomly from available defs.
+    /// Enemies are placed on floor tiles not occupied by other entities.
+    /// </summary>
+    private void PlaceEnemies(TileMap map, Random rng, List<MonsterDef> monsterDefs)
+    {
+        // Track positions already occupied by spawned entities
+        var occupiedPositions = new HashSet<(int, int)>();
+        foreach (var entity in SpawnedEntities)
+        {
+            occupiedPositions.Add((entity.X, entity.Y));
+        }
+        // Also mark entrance and exit
+        occupiedPositions.Add(EntrancePosition);
+        occupiedPositions.Add(ExitPosition);
+
+        for (int r = 1; r < Rooms.Count; r++) // skip room 0 (entrance)
+        {
+            var room = Rooms[r];
+
+            // Collect valid floor positions not occupied by items/chests
+            var validPositions = new List<(int X, int Y)>();
+            for (int y = room.Y; y < room.Y + room.Height; y++)
+            {
+                for (int x = room.X; x < room.X + room.Width; x++)
+                {
+                    var id = map.GetTileId(x, y);
+                    if (id == FloorTile && !occupiedPositions.Contains((x, y)))
+                        validPositions.Add((x, y));
+                }
+            }
+
+            if (validPositions.Count == 0) continue;
+
+            // 1-2 enemies per room (70% chance of 1, 30% chance of 2)
+            int enemyCount = rng.NextDouble() < 0.30 ? 2 : 1;
+
+            for (int i = 0; i < enemyCount && validPositions.Count > 0; i++)
+            {
+                int posIdx = rng.Next(validPositions.Count);
+                var pos = validPositions[posIdx];
+                validPositions.RemoveAt(posIdx);
+
+                var def = monsterDefs[rng.Next(monsterDefs.Count)];
+                var enemy = new Enemy(def);
+                enemy.SetPosition(pos.X, pos.Y);
+                SpawnedEntities.Add(enemy);
+
+                occupiedPositions.Add((pos.X, pos.Y));
             }
         }
     }

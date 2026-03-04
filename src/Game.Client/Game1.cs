@@ -1,18 +1,23 @@
 ﻿// src/Game.Client/Game1.cs
 
-using System;
-using System.Collections.Generic;
+using Game.Client.Input;
+using Game.Client.Rendering;
+using Game.Client.UI;
+using Game.Content;
+using Game.Core;
+using Game.Core.Entities;
+using Game.Core.Items;
+using Game.Core.Tiles;
+using Game.Core.Map;
+using Game.ProcGen.Generators;
 using Microsoft.Xna.Framework;
 using Microsoft.Xna.Framework.Graphics;
 using Microsoft.Xna.Framework.Input;
-using Game.Core;
-using Game.Core.Entities;
-using Game.Core.Map;
-using Game.Core.Tiles;
-using Game.Client.Rendering;
-using Game.Client.Input;
-using Game.ProcGen.Generators;
-using Game.Core.Items;
+using Myra;
+using System;
+using System.Collections.Generic;
+using System.IO;
+using System.Linq;
 
 #nullable enable
 
@@ -27,15 +32,13 @@ public class Game1 : Microsoft.Xna.Framework.Game
     private TileRenderer _renderer = null!;
     private Camera _camera = null!;
     private InputHandler _input = null!;
+    private HudManager _hud = null!;
 
     // Game state
     private GameState _state = null!;
 
-    // Tile registry — later this comes from Game.Content YAML loader
-    private Dictionary<string, TileDef> _tileRegistry = null!;
-
-    // Item registry — hardcoded for first playable, YAML loader replaces this
-    private List<ItemDef> _itemDefs = null!;
+    // Content registry — loaded from YAML by Game.Content
+    private ContentRegistry _content = null!;
 
     // Current seeds for display/debugging
     private int _overworldSeed;
@@ -54,7 +57,7 @@ public class Game1 : Microsoft.Xna.Framework.Game
 
     protected override void Initialize()
     {
-        Window.Title = "Roguelike — Phase 5 (Objects & Items)";
+        Window.Title = "Roguelike — Phase 8 (Combat)";
         Window.AllowUserResizing = true;
         Window.ClientSizeChanged += OnWindowResize;
 
@@ -65,11 +68,11 @@ public class Game1 : Microsoft.Xna.Framework.Game
     {
         _spriteBatch = new SpriteBatch(GraphicsDevice);
 
-        // Build tile registry (hardcoded for now — YAML loader replaces this)
-        _tileRegistry = BuildTileRegistry();
+        // ── Initialize Myra UI framework ─────────────────────────────
+        MyraEnvironment.Game = this;
 
-        // Build item registry (hardcoded for now — YAML loader replaces this)
-        _itemDefs = BuildItemDefs();
+        // ── Load all content from YAML ──────────────────────────────
+        _content = LoadContentPacks();
 
         // Create systems
         _camera = new Camera(
@@ -78,12 +81,117 @@ public class Game1 : Microsoft.Xna.Framework.Game
         );
         _renderer = new TileRenderer(GraphicsDevice, _spriteBatch);
         _input = new InputHandler();
+        _hud = new HudManager();
 
         // Subscribe to map transition events from the interaction system
         _input.OnMapTransition += HandleMapTransition;
 
         // Start on the overworld
         _state = CreateOverworldState();
+    }
+
+    /// <summary>
+    /// Discover and load content packs from the content/ directory.
+    /// Resolves the content root relative to the executable.
+    /// Falls back to a hardcoded registry if loading fails (graceful degradation).
+    /// </summary>
+    private ContentRegistry LoadContentPacks()
+    {
+        // Look for the content/ directory relative to the executable
+        var exeDir = AppDomain.CurrentDomain.BaseDirectory;
+        var candidates = new[]
+        {
+            Path.Combine(exeDir, "content"),
+            Path.Combine(exeDir, "..", "..", "..", "content"),            // running from bin/Debug/net8.0
+            Path.Combine(exeDir, "..", "..", "..", "..", "..", "content"), // deeper nesting
+            Path.Combine(Directory.GetCurrentDirectory(), "content"),
+        };
+
+        string? contentRoot = null;
+        foreach (var candidate in candidates)
+        {
+            var resolved = Path.GetFullPath(candidate);
+            if (Directory.Exists(resolved) &&
+                Directory.GetDirectories(resolved).Any(d => File.Exists(Path.Combine(d, "pack.yml"))))
+            {
+                contentRoot = resolved;
+                break;
+            }
+        }
+
+        if (contentRoot == null)
+        {
+            System.Diagnostics.Debug.WriteLine("WARNING: No content/ directory found. Using hardcoded fallback.");
+            return BuildFallbackRegistry();
+        }
+
+        var loader = new ContentLoader();
+        var registry = loader.LoadAll(contentRoot);
+
+        // Print load log
+        foreach (var msg in loader.Log)
+            System.Diagnostics.Debug.WriteLine($"[Content] {msg}");
+
+        // Print errors
+        foreach (var err in loader.Errors)
+            System.Diagnostics.Debug.WriteLine($"[Content ERROR] {err}");
+
+        // If loading failed critically, fall back
+        if (loader.Errors.Count > 0 || registry.Tiles.Count == 0)
+        {
+            System.Diagnostics.Debug.WriteLine("WARNING: Content loading had errors. Using hardcoded fallback.");
+            return BuildFallbackRegistry();
+        }
+
+        return registry;
+    }
+
+    /// <summary>
+    /// Hardcoded fallback registry — identical to the old BuildTileRegistry() +
+    /// BuildItemDefs() methods. Used only if YAML loading fails so the game
+    /// doesn't crash. Should never be needed once content/ is properly deployed.
+    /// </summary>
+    private ContentRegistry BuildFallbackRegistry()
+    {
+        var registry = new ContentRegistry();
+
+        // Tiles (same as old BuildTileRegistry)
+        var tiles = new[]
+        {
+            new TileDef { Id = "base:grass", Name = "Grass", Walkable = true, Color = "#3A7D2C" },
+            new TileDef { Id = "base:wall", Name = "Wall", Walkable = false, Color = "#4A4A4A" },
+            new TileDef { Id = "base:floor", Name = "Stone Floor", Walkable = true, Color = "#8B8B7A" },
+            new TileDef { Id = "base:dirt", Name = "Dirt", Walkable = true, Color = "#7A6033" },
+            new TileDef { Id = "base:water", Name = "Water", Walkable = false, Color = "#2255AA" },
+            new TileDef { Id = "base:dungeon_entrance", Name = "Dungeon Entrance", Walkable = true, Color = "#AA3333" },
+            new TileDef { Id = "base:dungeon_exit", Name = "Dungeon Exit", Walkable = true, Color = "#33AA33" },
+        };
+        foreach (var t in tiles) registry.RegisterTile(t);
+
+        // Items (same as old BuildItemDefs)
+        registry.RegisterItem(new ItemDef
+        {
+            Id = "base:gold_coin",
+            Name = "Gold Coin",
+            Tags = new List<string> { "currency", "common" },
+            Stackable = true,
+            MaxStack = 99,
+            Color = "#FFD700"
+        });
+        registry.RegisterItem(new ItemDef
+        {
+            Id = "base:health_potion",
+            Name = "Health Potion",
+            Tags = new List<string> { "consumable", "healing" },
+            Stackable = true,
+            MaxStack = 10,
+            EffectType = "heal",
+            EffectAmount = 15,
+            Color = "#FF4444"
+        });
+
+        registry.Freeze();
+        return registry;
     }
 
     protected override void Update(GameTime gameTime)
@@ -98,15 +206,34 @@ public class Game1 : Microsoft.Xna.Framework.Game
             _state = CreateOverworldState();
         }
 
+        // I to toggle inventory panel
+        if (_input.IsNewKeyPress(Keys.I))
+        {
+            _hud.ToggleInventory();
+        }
+
         // Get player input
         var action = _input.GetAction();
 
         // Process action — returns true if a turn was consumed
         bool turnTaken = _input.ProcessAction(action, _state);
 
-        if (turnTaken)
+        if (turnTaken && !_state.IsGameOver)
         {
-            // Enemy AI turns will go here in Phase 6.
+            // ── Enemy AI turns ────────────────────────────────────
+            // Process all enemies after the player's turn.
+            // Iterate over a snapshot to avoid mutation issues.
+            var enemies = _state.Entities
+                .OfType<Enemy>()
+                .Where(e => e.IsAlive)
+                .ToList();
+
+            foreach (var enemy in enemies)
+            {
+                if (_state.IsGameOver) break; // stop if player died mid-loop
+                enemy.TakeTurn(_state);
+            }
+
             _state.CleanupDead();
         }
 
@@ -121,6 +248,9 @@ public class Game1 : Microsoft.Xna.Framework.Game
             );
         }
 
+        // Update HUD from game state
+        _hud.Update(gameTime, _state);
+
         base.Update(gameTime);
     }
 
@@ -128,6 +258,7 @@ public class Game1 : Microsoft.Xna.Framework.Game
     {
         GraphicsDevice.Clear(Color.Black);
 
+        // ── Game world rendering (our SpriteBatch) ────────────────
         _spriteBatch.Begin(
             SpriteSortMode.Deferred,
             BlendState.AlphaBlend,
@@ -139,113 +270,14 @@ public class Game1 : Microsoft.Xna.Framework.Game
 
         _spriteBatch.End();
 
+        // ── HUD overlay (Myra manages its own SpriteBatch) ────────
+        _hud.Render();
+
         base.Draw(gameTime);
-    }
-
-    // ── Tile Registry (hardcoded, replaced by YAML loader later) ────
-
-    private Dictionary<string, TileDef> BuildTileRegistry()
-    {
-        var registry = new Dictionary<string, TileDef>();
-
-        var tiles = new[]
-        {
-            new TileDef
-            {
-                Id = "base:grass",
-                Name = "Grass",
-                Walkable = true,
-                Color = "#3A7D2C"
-            },
-            new TileDef
-            {
-                Id = "base:wall",
-                Name = "Wall",
-                Walkable = false,
-                Color = "#4A4A4A"
-            },
-            new TileDef
-            {
-                Id = "base:floor",
-                Name = "Stone Floor",
-                Walkable = true,
-                Color = "#8B8B7A"
-            },
-            new TileDef
-            {
-                Id = "base:dirt",
-                Name = "Dirt",
-                Walkable = true,
-                Color = "#7A6033"
-            },
-            new TileDef
-            {
-                Id = "base:water",
-                Name = "Water",
-                Walkable = false,
-                Color = "#2255AA"
-            },
-            new TileDef
-            {
-                Id = "base:dungeon_entrance",
-                Name = "Dungeon Entrance",
-                Walkable = true,
-                Color = "#AA3333"
-            },
-            new TileDef
-            {
-                Id = "base:dungeon_exit",
-                Name = "Dungeon Exit",
-                Walkable = true,
-                Color = "#33AA33"
-            }
-        };
-
-        foreach (var tile in tiles)
-            registry[tile.Id] = tile;
-
-        return registry;
-    }
-
-    // ── Item Registry (hardcoded, replaced by YAML loader later) ─────
-
-    /// <summary>
-    /// Build the item definitions that match content/BasePack/items/basic_items.yml.
-    /// These will be loaded from YAML by Game.Content in a future phase.
-    /// </summary>
-    private List<ItemDef> BuildItemDefs()
-    {
-        return new List<ItemDef>
-        {
-            new ItemDef
-            {
-                Id = "base:gold_coin",
-                Name = "Gold Coin",
-                Tags = new List<string> { "currency", "common" },
-                Stackable = true,
-                MaxStack = 99,
-                Color = "#FFD700"
-            },
-            new ItemDef
-            {
-                Id = "base:health_potion",
-                Name = "Health Potion",
-                Tags = new List<string> { "consumable", "healing" },
-                Stackable = true,
-                MaxStack = 10,
-                EffectType = "heal",
-                EffectAmount = 15,
-                Color = "#FF4444"
-            }
-        };
     }
 
     // ── Map Transition Handler ────────────────────────────────────
 
-    /// <summary>
-    /// Called by InputHandler when the player presses E on a transition tile.
-    /// Routes to the appropriate transition method.
-    /// </summary>
     private void HandleMapTransition(InputHandler.TransitionRequest request)
     {
         switch (request)
@@ -269,7 +301,7 @@ public class Game1 : Microsoft.Xna.Framework.Game
         _state.OverworldMap = _state.ActiveMap;
         _state.OverworldPlayerPosition = (_state.Player.X, _state.Player.Y);
 
-        // Generate a new dungeon
+        // Generate a new dungeon — tile registry comes from content
         _dungeonSeed = Environment.TickCount;
 
         var generator = new DungeonGenerator
@@ -282,22 +314,28 @@ public class Game1 : Microsoft.Xna.Framework.Game
             RoomMaxSize = 10
         };
 
-        var map = generator.Generate(_tileRegistry, _dungeonSeed, _itemDefs);
+        // Pass the content registry's tile dictionary, item list, and monster list
+        var tileDict = new Dictionary<string, TileDef>(_content.Tiles);
+        var monsterList = _content.MonsterList.Count > 0 ? _content.MonsterList.ToList() : null;
+        var map = generator.Generate(tileDict, _dungeonSeed, _content.ItemList.ToList(), monsterList);
 
         // Swap the active map and reposition the player at the dungeon entrance
         _state.ActiveMap = map;
         _state.Mode = GameMode.Dungeon;
         _state.Player.SetPosition(generator.EntrancePosition.X, generator.EntrancePosition.Y);
 
-        // Clear old entities and add freshly spawned items/chests
+        // Clear old entities and add freshly spawned items/chests/enemies
         _state.Entities.Clear();
         foreach (var entity in generator.SpawnedEntities)
             _state.Entities.Add(entity);
 
+        // Count enemies for the log message
+        int enemyCount = generator.SpawnedEntities.OfType<Enemy>().Count();
+
         _state.Log("—————————————————————————————");
-        _state.Log($"You descend into the dungeon... (seed: {_dungeonSeed}, {generator.Rooms.Count} rooms)");
+        _state.Log($"You descend into the dungeon... (seed: {_dungeonSeed}, {generator.Rooms.Count} rooms, {enemyCount} enemies)");
         _state.Log("Find the green exit tile to return to the overworld.");
-        _state.Log("WASD to move. E to interact with chests and exits.");
+        _state.Log("WASD to move. Walk into enemies to attack. E to interact.");
     }
 
     /// <summary>
@@ -330,10 +368,6 @@ public class Game1 : Microsoft.Xna.Framework.Game
 
     // ── State Creation Methods ──────────────────────────────────────
 
-    /// <summary>
-    /// Generate an overworld and place the player on it.
-    /// This is the game's starting state.
-    /// </summary>
     private GameState CreateOverworldState()
     {
         var state = new GameState();
@@ -349,7 +383,18 @@ public class Game1 : Microsoft.Xna.Framework.Game
             Octaves = 4
         };
 
-        var map = generator.Generate(_tileRegistry, _overworldSeed);
+        // Pass biome defs so the generator reads thresholds from data
+        var tileDict = new Dictionary<string, TileDef>(_content.Tiles);
+        TileMap map;
+        if (_content.Biomes.Count > 0)
+        {
+            map = generator.Generate(tileDict, _overworldSeed, _content.Biomes);
+        }
+        else
+        {
+            map = generator.Generate(tileDict, _overworldSeed);
+        }
+
         state.ActiveMap = map;
 
         // Also store as the preserved overworld (for returning from dungeons later)
@@ -364,7 +409,7 @@ public class Game1 : Microsoft.Xna.Framework.Game
         state.OverworldPlayerPosition = (generator.SpawnPosition.X, generator.SpawnPosition.Y);
 
         state.Log($"Overworld generated (seed: {_overworldSeed}).");
-        state.Log("WASD to move. E to interact. R to regenerate.");
+        state.Log("WASD to move. E to interact. I for inventory. R to regenerate.");
         state.Log("Find the red dungeon entrance tile and press E!");
 
         return state;
@@ -372,7 +417,6 @@ public class Game1 : Microsoft.Xna.Framework.Game
 
     /// <summary>
     /// Generate a standalone dungeon state. Used for debug/testing only.
-    /// Normal gameplay uses EnterDungeon() which preserves overworld state.
     /// </summary>
     private GameState CreateDungeonState()
     {
@@ -391,20 +435,21 @@ public class Game1 : Microsoft.Xna.Framework.Game
             RoomMaxSize = 10
         };
 
-        var map = generator.Generate(_tileRegistry, _dungeonSeed, _itemDefs);
+        var tileDict = new Dictionary<string, TileDef>(_content.Tiles);
+        var monsterList = _content.MonsterList.Count > 0 ? _content.MonsterList.ToList() : null;
+        var map = generator.Generate(tileDict, _dungeonSeed, _content.ItemList.ToList(), monsterList);
         state.ActiveMap = map;
 
-        // Place the player at the dungeon entrance
         var player = new Player();
         player.SetPosition(generator.EntrancePosition.X, generator.EntrancePosition.Y);
         state.Player = player;
 
-        // Add spawned items and chests
         foreach (var entity in generator.SpawnedEntities)
             state.Entities.Add(entity);
 
-        state.Log($"Dungeon generated (seed: {_dungeonSeed}). {generator.Rooms.Count} rooms.");
-        state.Log("WASD to move. E on green exit tile to leave.");
+        int enemyCount = generator.SpawnedEntities.OfType<Enemy>().Count();
+        state.Log($"Dungeon generated (seed: {_dungeonSeed}). {generator.Rooms.Count} rooms, {enemyCount} enemies.");
+        state.Log("WASD to move. Walk into enemies to attack. E on green exit to leave.");
 
         return state;
     }

@@ -1,6 +1,11 @@
 # content/BasePack/pack.yml
+# Pack manifest for the base game content.
+# Every content pack has one of these at its root.
+
+schema: pack_manifest.v1
 id: base
-name: "Base Content Pack"
-version: 0.1.0
-description: "Core game content"
+name: "Base Pack"
+version: "0.1.0"
+description: "Core game content — tiles, items, biomes, and starter dungeon."
+author: "Game Dev"
 dependencies: []

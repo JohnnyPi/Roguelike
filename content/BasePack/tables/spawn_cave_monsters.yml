@@ -1,7 +1,22 @@
 # content/BasePack/tables/spawn_cave_monsters.yml
+# Monster spawn table for basic caves.
+# Stub — entries will be added when Enemy entities are implemented (Priority 4).
+
 schema: spawn_table.v1
 id: base:spawn_cave_monsters
-entries:
-  - id: base:goblin
-    weight: 100
-    tags: [humanoid, earlygame]
+name: "Cave Monster Spawns"
+tags: [cave, earlygame]
+entries: []
+# Entries will be added when monster defs exist. Format:
+#   - id: base:bat
+#     weight: 40
+#     threatCost: 1
+#     tags: [flying, weak]
+#   - id: base:rat
+#     weight: 35
+#     threatCost: 1
+#     tags: [beast, weak]
+#   - id: base:goblin
+#     weight: 25
+#     threatCost: 2
+#     tags: [humanoid, armed]
