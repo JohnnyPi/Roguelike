@@ -1,0 +1,57 @@
+# content/BasePack/dungeons/cave_basic.yml
+schema: dungeon_blueprint.v1
+id: base:cave_basic
+name: "Basic Cave"
+tags: [cave, natural, earlygame]
+requires:
+  - base:tileset_cave
+
+defaults:
+  seedSalt: "cave_basic"
+  difficulty:
+    depthMin: 1
+    depthMax: 5
+    threatBudgetMin: 6
+    threatBudgetMax: 12
+
+  size:
+    grid:
+      widthMin: 60
+      widthMax: 60
+      heightMin: 40
+      heightMax: 40
+    targetFloorRatioMin: 0.30
+    targetFloorRatioMax: 0.50
+
+  rooms:
+    countMin: 6
+    countMax: 12
+    widthMin: 5
+    widthMax: 10
+    heightMin: 5
+    heightMax: 10
+
+  connectivity:
+    mustBeConnected: true
+    corridorStyle: "l_shaped"
+
+  entranceExit:
+    requireEntrance: true
+    requireExit: false
+
+population:
+  monsterTableId: base:spawn_cave_monsters
+  itemTableId: base:loot_cave_common
+  itemRolls:
+    min: 2
+    max: 5
+  chestCount:
+    min: 1
+    max: 3
+
+validation:
+  maxAttempts: 30
+  onFail: regen
+  assertions:
+    - id: connected
+      kind: must_be_connected

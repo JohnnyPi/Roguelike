@@ -1,0 +1,7 @@
+# content/BasePack/tables/spawn_cave_monsters.yml
+schema: spawn_table.v1
+id: base:spawn_cave_monsters
+entries:
+  - id: base:goblin
+    weight: 100
+    tags: [humanoid, earlygame]

@@ -1,0 +1,8 @@
+<Solution>
+  <Project Path="src/Game.Client/Game.Client.csproj" />
+  <Project Path="src/Game.Content/Game.Content.csproj" />
+  <Project Path="src/Game.Core/Game.Core.csproj" />
+  <Project Path="src/Game.Persistence/Game.Persistence.csproj" />
+  <Project Path="src/Game.ProcGen/Game.ProcGen.csproj" />
+  <Project Path="src/Game.World/Game.World.csproj" />
+</Solution>

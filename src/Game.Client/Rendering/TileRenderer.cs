@@ -1,0 +1,197 @@
+// src/Game.Client/Rendering/TileRenderer.cs
+
+using System;
+using System.Collections.Generic;
+using Microsoft.Xna.Framework;
+using Microsoft.Xna.Framework.Graphics;
+using Game.Core;
+using Game.Core.Tiles;
+using Game.Core.Entities;
+
+namespace Game.Client.Rendering;
+
+/// <summary>
+/// Draws the tile grid and entities using colored rectangles.
+/// All drawing is offset by the camera position so the viewport
+/// follows the player.
+/// </summary>
+public class TileRenderer
+{
+    public const int TileSize = 32;
+
+    private readonly SpriteBatch _spriteBatch;
+    private readonly Texture2D _pixel;
+    private readonly Dictionary<string, Color> _colorCache = new();
+
+    public TileRenderer(GraphicsDevice graphicsDevice, SpriteBatch spriteBatch)
+    {
+        _spriteBatch = spriteBatch;
+
+        // Create a 1x1 white pixel texture — the foundation of all our vector drawing.
+        // We scale and tint this to draw any colored rectangle.
+        _pixel = new Texture2D(graphicsDevice, 1, 1);
+        _pixel.SetData(new[] { Color.White });
+    }
+
+    /// <summary>
+    /// Draw the visible portion of the map and all entities.
+    /// Call this between SpriteBatch.Begin() and .End().
+    /// </summary>
+    public void Draw(GameState state, Camera camera)
+    {
+        if (state.ActiveMap == null) return;
+
+        DrawTiles(state, camera);
+        DrawEntities(state, camera);
+        DrawPlayer(state, camera);
+    }
+
+    private void DrawTiles(GameState state, Camera camera)
+    {
+        var map = state.ActiveMap!;
+
+        // Calculate visible tile range from camera bounds
+        int startX = Math.Max(0, (int)(camera.X / TileSize));
+        int startY = Math.Max(0, (int)(camera.Y / TileSize));
+        int endX = Math.Min(map.Width, startX + (camera.ViewportWidth / TileSize) + 2);
+        int endY = Math.Min(map.Height, startY + (camera.ViewportHeight / TileSize) + 2);
+
+        for (int y = startY; y < endY; y++)
+            for (int x = startX; x < endX; x++)
+            {
+                var tile = map.GetTile(x, y);
+                if (tile == null) continue;
+
+                var color = GetCachedColor(tile);
+                var screenPos = new Vector2(
+                    x * TileSize - camera.X,
+                    y * TileSize - camera.Y
+                );
+
+                _spriteBatch.Draw(
+                    _pixel,
+                    new Rectangle((int)screenPos.X, (int)screenPos.Y, TileSize, TileSize),
+                    color
+                );
+
+                // Draw a subtle border so tiles are distinguishable
+                DrawTileBorder(screenPos, color);
+            }
+    }
+
+    private void DrawTileBorder(Vector2 screenPos, Color tileColor)
+    {
+        // Darken the tile color for the border
+        var borderColor = new Color(
+            (int)(tileColor.R * 0.7f),
+            (int)(tileColor.G * 0.7f),
+            (int)(tileColor.B * 0.7f)
+        );
+
+        int x = (int)screenPos.X;
+        int y = (int)screenPos.Y;
+
+        // Top edge
+        _spriteBatch.Draw(_pixel, new Rectangle(x, y, TileSize, 1), borderColor);
+        // Left edge
+        _spriteBatch.Draw(_pixel, new Rectangle(x, y, 1, TileSize), borderColor);
+    }
+
+    private void DrawEntities(GameState state, Camera camera)
+    {
+        foreach (var entity in state.Entities)
+        {
+            if (!entity.IsAlive) continue;
+
+            var screenPos = new Vector2(
+                entity.X * TileSize - camera.X,
+                entity.Y * TileSize - camera.Y
+            );
+
+            // Enemies: red square with dark border, slightly inset
+            int inset = 4;
+            _spriteBatch.Draw(
+                _pixel,
+                new Rectangle(
+                    (int)screenPos.X + inset,
+                    (int)screenPos.Y + inset,
+                    TileSize - inset * 2,
+                    TileSize - inset * 2
+                ),
+                Color.Red
+            );
+        }
+    }
+
+    private void DrawPlayer(GameState state, Camera camera)
+    {
+        var player = state.Player;
+        if (player == null || player.IsDead) return;
+
+        var screenPos = new Vector2(
+            player.X * TileSize - camera.X,
+            player.Y * TileSize - camera.Y
+        );
+
+        // Player: bright cyan square, slightly inset from tile edges
+        int inset = 3;
+        _spriteBatch.Draw(
+            _pixel,
+            new Rectangle(
+                (int)screenPos.X + inset,
+                (int)screenPos.Y + inset,
+                TileSize - inset * 2,
+                TileSize - inset * 2
+            ),
+            Color.Cyan
+        );
+
+        // Small inner highlight to distinguish from enemies
+        int innerInset = 8;
+        _spriteBatch.Draw(
+            _pixel,
+            new Rectangle(
+                (int)screenPos.X + innerInset,
+                (int)screenPos.Y + innerInset,
+                TileSize - innerInset * 2,
+                TileSize - innerInset * 2
+            ),
+            Color.White
+        );
+    }
+
+    /// <summary>
+    /// Parse hex color from TileDef and cache it.
+    /// Avoids re-parsing every frame for every tile.
+    /// </summary>
+    private Color GetCachedColor(TileDef tile)
+    {
+        if (_colorCache.TryGetValue(tile.Id, out var cached))
+            return cached;
+
+        var color = ParseHexColor(tile.Color);
+        _colorCache[tile.Id] = color;
+        return color;
+    }
+
+    /// <summary>Parse "#RRGGBB" or "#RRGGBBAA" into an XNA Color.</summary>
+    public static Color ParseHexColor(string hex)
+    {
+        if (string.IsNullOrEmpty(hex) || hex[0] != '#')
+            return Color.Magenta; // fallback = obvious "missing" color
+
+        try
+        {
+            hex = hex.TrimStart('#');
+            int r = Convert.ToInt32(hex.Substring(0, 2), 16);
+            int g = Convert.ToInt32(hex.Substring(2, 2), 16);
+            int b = Convert.ToInt32(hex.Substring(4, 2), 16);
+            int a = hex.Length >= 8 ? Convert.ToInt32(hex.Substring(6, 2), 16) : 255;
+            return new Color(r, g, b, a);
+        }
+        catch
+        {
+            return Color.Magenta;
+        }
+    }
+}

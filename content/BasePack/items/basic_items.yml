@@ -1,0 +1,17 @@
+# content/BasePack/items/basic_items.yml
+schema: item_defs.v1
+items:
+  - id: base:gold_coin
+    name: "Gold Coin"
+    tags: [currency, common]
+    stackable: true
+    maxStack: 99
+
+  - id: base:health_potion
+    name: "Health Potion"
+    tags: [consumable, healing]
+    stackable: true
+    maxStack: 10
+    effect:
+      type: heal
+      amount: 15

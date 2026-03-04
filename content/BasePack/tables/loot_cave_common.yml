@@ -1,0 +1,8 @@
+# content/BasePack/tables/loot_cave_common.yml
+schema: loot_table.v1
+id: base:loot_cave_common
+entries:
+  - id: base:gold_coin
+    weight: 60
+  - id: base:health_potion
+    weight: 40

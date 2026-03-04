@@ -1,0 +1,6 @@
+# content/BasePack/pack.yml
+id: base
+name: "Base Content Pack"
+version: 0.1.0
+description: "Core game content"
+dependencies: []

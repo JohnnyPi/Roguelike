@@ -1,0 +1,43 @@
+# content/BasePack/tiles.yml
+tiles:
+  - id: base:grass
+    name: "Grass"
+    walkable: true
+    sprite: grass_01
+    color: "#3A7D2C"
+    tags: [terrain, natural]
+
+  - id: base:wall
+    name: "Wall"
+    walkable: false
+    sprite: wall_01
+    color: "#4A4A4A"
+    tags: [solid, stone]
+
+  - id: base:floor
+    name: "Stone Floor"
+    walkable: true
+    sprite: floor_01
+    color: "#8B8B7A"
+    tags: [terrain, constructed]
+
+  - id: base:dirt
+    name: "Dirt"
+    walkable: true
+    sprite: dirt_01
+    color: "#7A6033"
+    tags: [terrain, natural]
+
+  - id: base:water
+    name: "Water"
+    walkable: false
+    sprite: water_01
+    color: "#2255AA"
+    tags: [terrain, liquid]
+
+  - id: base:dungeon_entrance
+    name: "Dungeon Entrance"
+    walkable: true
+    sprite: entrance_01
+    color: "#AA3333"
+    tags: [structure, interactable]
