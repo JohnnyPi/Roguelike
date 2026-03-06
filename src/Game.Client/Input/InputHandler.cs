@@ -158,7 +158,7 @@ public class InputHandler
             return true;
         }
 
-        player.Move(dx, dy);
+        state.MoveEntity(player, dx, dy);
         TryPickupItems(state);
         return true;
     }

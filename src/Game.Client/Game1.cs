@@ -49,6 +49,12 @@ public partial class Game1 : Microsoft.Xna.Framework.Game
     private int _overworldSeed;
     private int _dungeonSeed;
 
+    // -- Flicker dirty tracking -------------------------------------------
+    // Skip LightMap.Recompute when no source intensity changed enough to
+    // be visible. 0.015 ~ 4/255 -- below single-channel rounding noise.
+    private float[]? _lastFlickerIntensities;
+    private const float FlickerThreshold = 0.015f;
+
     // -- UI font ----------------------------------------------------------
     private SpriteFont? _uiFont;
 
@@ -294,15 +300,42 @@ public partial class Game1 : Microsoft.Xna.Framework.Game
         }
 
         // -- Torch flicker (real-time, runs every frame regardless of turns) --
-        // This recomputes the dungeon LightMap each frame with animated per-source
-        // intensities. On the overworld there are no LightSources so this is a no-op.
+        // Recomputes the dungeon LightMap only when at least one source intensity
+        // has moved more than FlickerThreshold since the last frame.
+        // On the overworld there are no LightSources so the block is skipped entirely.
         _flicker.Update(gameTime.ElapsedGameTime.TotalSeconds);
         if (_state.Mode == GameMode.Dungeon
             && _state.ActiveMap?.Lighting != null
             && _state.LightSources.Count > 0)
         {
-            var intensities = _flicker.GetIntensities(_state.LightSources);
-            _state.ActiveMap.Lighting.Recompute(_state.LightSources, intensities);
+            var sources = _state.LightSources;
+            var intensities = _flicker.GetIntensities(sources);
+
+            bool dirty = false;
+            if (_lastFlickerIntensities == null || _lastFlickerIntensities.Length < sources.Count)
+            {
+                _lastFlickerIntensities = new float[sources.Count];
+                dirty = true;
+            }
+            else
+            {
+                for (int i = 0; i < sources.Count; i++)
+                {
+                    if (Math.Abs(intensities[i] - _lastFlickerIntensities[i]) > FlickerThreshold)
+                    {
+                        dirty = true;
+                        break;
+                    }
+                }
+            }
+
+            if (dirty)
+            {
+                for (int i = 0; i < sources.Count; i++)
+                    _lastFlickerIntensities[i] = intensities[i];
+
+                _state.ActiveMap.Lighting.Recompute(sources, intensities);
+            }
         }
 
         _spriteBatch.Begin(

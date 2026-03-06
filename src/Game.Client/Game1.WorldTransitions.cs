@@ -75,7 +75,11 @@ public partial class Game1
         // -- Swap active map ---------------------------------------------
         _state.ActiveMap = map;
         _state.Mode = GameMode.Dungeon;
-        _state.Player.SetPosition(generator.EntrancePosition.X, generator.EntrancePosition.Y);
+
+        // Move player to entrance -- use MoveEntity so spatial index stays consistent
+        _state.MoveEntity(_state.Player,
+            generator.EntrancePosition.X - _state.Player.X,
+            generator.EntrancePosition.Y - _state.Player.Y);
 
         // Initial FOV from entrance position
         map.Visibility?.Recompute(
@@ -85,9 +89,18 @@ public partial class Game1
         );
 
         // -- Populate entities -------------------------------------------
+        // Clear old entities and rebuild the spatial index for the new map
         _state.Entities.Clear();
+        _state.ClearSpatialIndex();
+
+        // Re-register player at new position
+        _state.RegisterEntity(_state.Player);
+
         foreach (var entity in generator.SpawnedEntities)
+        {
             _state.Entities.Add(entity);
+            _state.RegisterEntity(entity);
+        }
 
         int enemyCount = generator.SpawnedEntities.OfType<Enemy>().Count();
 
@@ -113,13 +126,15 @@ public partial class Game1
         _state.ActiveMap = _state.OverworldMap;
         _state.Mode = GameMode.Overworld;
 
-        // Restore player position
-        var pos = _state.OverworldPlayerPosition.Value;
-        _state.Player.SetPosition(pos.X, pos.Y);
-
-        // Clear dungeon entities and light sources
+        // Clear dungeon entities and rebuild spatial index for the overworld
         _state.Entities.Clear();
         _state.LightSources.Clear();
+        _state.ClearSpatialIndex();
+
+        // Restore player position and re-register in the index
+        var pos = _state.OverworldPlayerPosition.Value;
+        _state.Player.SetPosition(pos.X, pos.Y);
+        _state.RegisterEntity(_state.Player);
 
         // Restore overworld FOV radius
         _state.BaseFovRadius = 12;

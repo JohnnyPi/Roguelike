@@ -29,12 +29,23 @@ public partial class TileRenderer
         var map = state.ActiveMap!;
         int ts = camera.ZoomedTileSize;
 
-        // TODO: cull to camera bounds before iterating (see NEXT_STEPS)
+        // Cull to camera bounds in tile space before dispatching draw calls.
+        // Entities outside the visible viewport are skipped entirely.
+        int tileLeft = (int)(camera.X / ts) - 1;
+        int tileTop = (int)(camera.Y / ts) - 1;
+        int tileRight = tileLeft + (int)Math.Ceiling((float)camera.ViewportWidth / ts) + 2;
+        int tileBottom = tileTop + (int)Math.Ceiling((float)camera.ViewportHeight / ts) + 2;
+
         foreach (var entity in state.Entities)
         {
             if (!entity.IsAlive) continue;
 
-            // Only draw entities on currently-visible tiles
+            // Camera-bounds cull (cheap integer test)
+            if (entity.X < tileLeft || entity.X > tileRight ||
+                entity.Y < tileTop || entity.Y > tileBottom)
+                continue;
+
+            // FOV cull -- only draw entities on currently-visible tiles
             if (map.Visibility != null && !map.IsVisible(entity.X, entity.Y))
                 continue;
 

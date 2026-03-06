@@ -28,10 +28,9 @@
 //   Tick() returns true when it advances the player (a turn was consumed),
 //   so Game1 can run enemy AI the same way as keyboard movement.
 //
-// GoRogue pathfinding note:
-//   This uses a simple BFS for now. When GoRogue is wired up properly,
-//   swap FindPath() internals for AStar from GoRogue — the public API
-//   of PathController does not change.
+// Pathfinding:
+//   FindPath() uses A* with a Chebyshev heuristic and diagonal cost ~1.414.
+//   This is O(path_length * log n) vs the old BFS O(n) over the full walkable area.
 
 #nullable enable
 
@@ -169,7 +168,7 @@ public sealed class PathController
             return false;
         }
 
-        player.Move(next.X - player.X, next.Y - player.Y);
+        state.MoveEntity(player, next.X - player.X, next.Y - player.Y);
         _stepIndex++;
         state.TryPickupItems();
 
@@ -242,43 +241,79 @@ public sealed class PathController
     }
 
     /// <summary>
-    /// BFS pathfinder on the tile grid.
+    /// A* pathfinder on the tile grid (Chebyshev heuristic for 8-directional movement).
     /// Returns a list of steps NOT including the starting tile,
     /// ending at (to). Returns null if no path exists.
     ///
-    /// TODO: swap internals for GoRogue AStar once it's wired to the map adapter.
-    /// The public PathController API does not need to change.
+    /// Complexity: O(path_length * log n) vs BFS O(n) over full walkable area.
+    /// Straight moves cost 1.0, diagonal moves cost 1.4 (approx sqrt 2) so
+    /// the planner correctly prefers straight corridors over staircase diagonals.
     /// </summary>
     private static List<Point>? FindPath(Point from, Point to, IWorldMap map)
     {
         if (from == to) return new List<Point>();
 
-        // BFS
-        var queue = new Queue<Point>();
-        var cameFrom = new Dictionary<Point, Point>();
-
-        queue.Enqueue(from);
-        cameFrom[from] = from;
+        // Movement costs: cardinals = 1.0, diagonals = ~1.414
+        const float CARD = 1.0f;
+        const float DIAG = 1.414f;
 
         int[] dx = { 0, 0, 1, -1, 1, -1, 1, -1 };
         int[] dy = { -1, 1, 0, 0, -1, -1, 1, 1 };
+        float[] cost = { CARD, CARD, CARD, CARD, DIAG, DIAG, DIAG, DIAG };
 
-        while (queue.Count > 0)
+        // Chebyshev distance heuristic -- admissible for 8-dir movement
+        static float Heuristic(Point a, Point b)
         {
-            var current = queue.Dequeue();
+            int ddx = Math.Abs(a.X - b.X);
+            int ddy = Math.Abs(a.Y - b.Y);
+            int straight = Math.Abs(ddx - ddy);
+            int diagonal = Math.Min(ddx, ddy);
+            return straight * CARD + diagonal * DIAG;
+        }
+
+        var gScore = new Dictionary<Point, float>();
+        var cameFrom = new Dictionary<Point, Point>();
+
+        // Min-heap: (fScore, point)
+        // Use SortedSet with a tie-breaking comparer so equal f-scores don't collide
+        var open = new SortedSet<(float f, int tieBreak, Point p)>(
+            Comparer<(float f, int tieBreak, Point p)>.Create(
+                (a, b) =>
+                {
+                    int fc = a.f.CompareTo(b.f);
+                    if (fc != 0) return fc;
+                    return a.tieBreak.CompareTo(b.tieBreak);
+                }
+            )
+        );
+
+        int counter = 0;
+        gScore[from] = 0f;
+        open.Add((Heuristic(from, to), counter++, from));
+        cameFrom[from] = from;
+
+        while (open.Count > 0)
+        {
+            var (_, _, current) = open.Min;
+            open.Remove(open.Min);
 
             if (current == to)
                 return ReconstructPath(cameFrom, from, to);
 
+            float g = gScore[current];
+
             for (int d = 0; d < 8; d++)
             {
                 var next = new Point(current.X + dx[d], current.Y + dy[d]);
-
-                if (cameFrom.ContainsKey(next)) continue;
                 if (!map.IsWalkable(next.X, next.Y)) continue;
 
+                float tentative = g + cost[d];
+                if (gScore.TryGetValue(next, out float existing) && tentative >= existing)
+                    continue;
+
+                gScore[next] = tentative;
                 cameFrom[next] = current;
-                queue.Enqueue(next);
+                open.Add((tentative + Heuristic(next, to), counter++, next));
             }
         }
 

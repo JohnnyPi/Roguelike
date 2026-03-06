@@ -4,9 +4,9 @@
 // AI behavior is processed each turn after the player acts.
 //
 // AI types:
-//   "chase"  — move toward player if within SightRange, wander otherwise
-//   "wander" — random movement (passive until attacked, then chases)
-//   "guard"  — stationary until player enters SightRange, then chases
+//   "chase"  - move toward player if within SightRange, wander otherwise
+//   "wander" - random movement (passive until attacked, then chases)
+//   "guard"  - stationary until player enters SightRange, then chases
 
 using Game.Core.Monsters;
 
@@ -32,6 +32,13 @@ public class Enemy : Entity
 
     public bool IsDead => Hp <= 0;
 
+    /// <summary>
+    /// Per-instance RNG for wander behavior. Seeded from InstanceId so
+    /// enemies in the same room don't move in unison, but also not
+    /// reconstructed every turn (avoids per-turn allocation).
+    /// </summary>
+    private readonly Random _rng;
+
     public Enemy(MonsterDef def)
     {
         Def = def;
@@ -46,6 +53,9 @@ public class Enemy : Entity
         Defense = def.Defense;
         SightRange = def.SightRange;
         AiBehavior = def.AiBehavior;
+
+        // Seed from InstanceId for per-enemy variety without shared state
+        _rng = new Random((int)(InstanceId * 2654435761u));
     }
 
     /// <summary>Apply damage after defense calculation. Minimum 1 damage.</summary>
@@ -97,7 +107,6 @@ public class Enemy : Entity
     /// <summary>
     /// Try to move toward the player. If adjacent, attack instead.
     /// Uses simple Manhattan distance-reducing movement (no pathfinding yet).
-    /// GoRogue pathfinding will replace this later.
     /// </summary>
     private AiAction TryChaseOrAttack(GameState state, Player player)
     {
@@ -115,7 +124,7 @@ public class Enemy : Entity
             return AiAction.Attack;
         }
 
-        // Not adjacent — try to step closer
+        // Not adjacent - try to step closer
         return TryStepToward(state, player.X, player.Y);
     }
 
@@ -149,7 +158,7 @@ public class Enemy : Entity
         {
             if (CanMoveTo(state, X + firstDx, Y + firstDy))
             {
-                Move(firstDx, firstDy);
+                state.MoveEntity(this, firstDx, firstDy);
                 return AiAction.Move;
             }
         }
@@ -159,27 +168,23 @@ public class Enemy : Entity
         {
             if (CanMoveTo(state, X + secondDx, Y + secondDy))
             {
-                Move(secondDx, secondDy);
+                state.MoveEntity(this, secondDx, secondDy);
                 return AiAction.Move;
             }
         }
 
-        // Can't move toward target — wait
+        // Can't move toward target - wait
         return AiAction.Wait;
     }
 
     /// <summary>Random movement in a cardinal direction.</summary>
     private AiAction TryWander(GameState state)
     {
-        // Use a simple seeded approach based on instance ID + position for variety
-        // (avoids needing to pass Random through — good enough for wander behavior)
-        var rng = new Random(InstanceId * 31 + X * 7 + Y * 13 + (state.MessageLog.Count * 3));
-
         int[] dxs = { 0, 0, 1, -1 };
         int[] dys = { -1, 1, 0, 0 };
 
-        // Shuffle direction order
-        int startDir = rng.Next(4);
+        // Shuffle direction order using the persistent per-instance RNG
+        int startDir = _rng.Next(4);
         for (int i = 0; i < 4; i++)
         {
             int dir = (startDir + i) % 4;
@@ -188,7 +193,7 @@ public class Enemy : Entity
 
             if (CanMoveTo(state, nx, ny))
             {
-                Move(dxs[dir], dys[dir]);
+                state.MoveEntity(this, dxs[dir], dys[dir]);
                 return AiAction.Move;
             }
         }
@@ -206,7 +211,7 @@ public class Enemy : Entity
         if (state.Player.X == x && state.Player.Y == y)
             return false;
 
-        // Don't walk into other blocking entities
+        // O(1) spatial index lookup -- replaces the old O(n) entity scan
         var blocker = state.GetBlockingEntityAt(x, y);
         return blocker == null;
     }

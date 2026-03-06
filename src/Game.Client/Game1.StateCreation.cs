@@ -116,6 +116,9 @@ public partial class Game1
         state.Player = player;
         state.OverworldPlayerPosition = (spawnPos.X, spawnPos.Y);
 
+        // Register player in spatial index (player always blocks movement)
+        state.RegisterEntity(player);
+
         // Initial FOV
         chunkedMap.Visibility?.Recompute(spawnPos.X, spawnPos.Y,
                                           state.EffectiveFovRadius);
@@ -170,6 +173,7 @@ public partial class Game1
         var player = new Player();
         player.SetPosition(generator.EntrancePosition.X, generator.EntrancePosition.Y);
         state.Player = player;
+        state.RegisterEntity(player);
 
         map.Visibility?.Recompute(
             generator.EntrancePosition.X,
@@ -178,7 +182,10 @@ public partial class Game1
         );
 
         foreach (var entity in generator.SpawnedEntities)
+        {
             state.Entities.Add(entity);
+            state.RegisterEntity(entity);
+        }
 
         int enemyCount = generator.SpawnedEntities.OfType<Enemy>().Count();
         state.Log($"Dungeon generated (seed: {_dungeonSeed}). {generator.Rooms.Count} rooms, {enemyCount} enemies.");
