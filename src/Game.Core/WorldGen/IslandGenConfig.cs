@@ -47,12 +47,12 @@ public sealed record IslandGenConfig
 
     // ── Map size ─────────────────────────────────────────────────────
 
-    /// <summary>Map width in tiles. Should match MapHeight for square islands.</summary>
-    [Range(64, 1024)]
+    /// <summary>Map width in tiles.</summary>
+    [Range(64, 4096)]
     public int MapWidth { get; init; } = 512;
 
     /// <summary>Map height in tiles.</summary>
-    [Range(64, 1024)]
+    [Range(64, 4096)]
     public int MapHeight { get; init; } = 512;
 
     // ── Noise / FBm ──────────────────────────────────────────────────
@@ -89,11 +89,28 @@ public sealed record IslandGenConfig
     // ── Island count (archipelago) ────────────────────────────────────
 
     /// <summary>
-    /// Number of islands to generate. 1 = single island. 2-6 = island chain / archipelago.
-    /// Islands are arranged along a randomised chain axis across the map.
+    /// Number of islands to generate. 1 = single island. 2-8 = island chain / archipelago.
+    /// Islands are placed along a Bezier curve across the map.
     /// </summary>
-    [Range(1, 6)]
+    [Range(1, 8)]
     public int IslandCount { get; init; } = 1;
+
+    /// <summary>
+    /// How much the island chain curves. 0.0 = straight line. 1.0 = strong arc.
+    /// The curve is a quadratic Bezier: the control point is offset perpendicular
+    /// to the chain axis by this fraction of the map's shorter dimension.
+    /// </summary>
+    [Range(0.0f, 1.0f)]
+    public float ChainCurveAmount { get; init; } = 0.25f;
+
+    /// <summary>
+    /// Minimum gap between island edges in tiles. Islands are spread apart until
+    /// no two island edges are closer than this value. Prevents islands merging
+    /// into one landmass when IslandCount > 1.
+    /// Typical: 30-80 tiles.
+    /// </summary>
+    [Range(10, 300)]
+    public int MinIslandSeparation { get; init; } = 40;
 
     // ── Island shape ─────────────────────────────────────────────────
 
@@ -116,7 +133,7 @@ public sealed record IslandGenConfig
     /// 0.0 = perfect circle. 0.18 = natural. 0.4+ = very jagged fjord-like.
     /// </summary>
     [Range(0.0f, 0.5f)]
-    public float CoastWarpStrength { get; init; } = 0.18f;
+    public float CoastWarpStrength { get; init; } = 0.35f;
 
     // ── Climate / moisture ───────────────────────────────────────────
 
@@ -311,7 +328,30 @@ public sealed record IslandGenConfig
         LavaFlowCount = 1,
     };
 
-    // ── Validation ───────────────────────────────────────────────────
+    /// <summary>
+    /// Wide island chain: 2048x1024 map with 5 islands along a curved Bezier arc.
+    /// Each island has its own climate variation. Good spread, clear water gaps.
+    /// </summary>
+    public static IslandGenConfig IslandChain => new()
+    {
+        MapWidth = 2048,
+        MapHeight = 1024,
+        Frequency = 0.004f,
+        Octaves = 7,
+        IslandCount = 5,
+        IslandRadiusScale = 0.72f,
+        ChainCurveAmount = 0.30f,
+        MinIslandSeparation = 50,
+        CoastWarpStrength = 0.22f,
+        IslandFalloffExp = 2.0f,
+        WindGradientStrength = 0.55f,
+        MoistureNoiseWeight = 0.55f,
+        VolcanoCount = 2,
+        RiverCount = 5,
+        EntranceCount = 5,
+        MinEntranceSpacing = 200,
+        MinEntranceFromSpawn = 120,
+    };
 
     /// <summary>
     /// Returns true if all values are within their documented safe ranges.
@@ -319,8 +359,8 @@ public sealed record IslandGenConfig
     /// </summary>
     public bool IsValid(out string violation)
     {
-        if (MapWidth < 64 || MapWidth > 1024) { violation = "MapWidth out of range (64-1024)"; return false; }
-        if (MapHeight < 64 || MapHeight > 1024) { violation = "MapHeight out of range (64-1024)"; return false; }
+        if (MapWidth < 64 || MapWidth > 4096) { violation = "MapWidth out of range (64-4096)"; return false; }
+        if (MapHeight < 64 || MapHeight > 4096) { violation = "MapHeight out of range (64-4096)"; return false; }
         if (Frequency < 0.001f) { violation = "Frequency too low (min 0.001)"; return false; }
         if (Octaves < 1 || Octaves > 8) { violation = "Octaves out of range (1-8)"; return false; }
         if (IslandRadiusScale < 0.1f || IslandRadiusScale > 0.99f) { violation = "IslandRadiusScale out of range (0.1-0.99)"; return false; }

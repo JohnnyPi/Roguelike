@@ -1,206 +1,382 @@
 ﻿# content/BasePack/biomes/overworld_biomes.yml
 #
-# Two-axis biome table: elevation + moisture (Whittaker-style).
+# Three-axis biome table: elevation x moisture x temperature.
 #
-# LOOKUP RULES:
-#   - The generator picks the NARROWEST moisture-range biome whose elevation AND
-#     moisture ranges both contain the sampled values.
-#   - Biomes with MoistureMin=0/MoistureMax=1 act as catch-all for their elevation band.
-#   - Within each land band, list moisture-specific variants AFTER the catch-all.
-#     They are automatically preferred because they have a narrower moisture range.
+# LOOKUP: The generator picks the MOST SPECIFIC (narrowest combined moisture+temperature
+# range) biome whose elevation, moisture AND temperature all match.
+# Biomes with moisture/temperature spanning 0..1 act as catch-alls for their band.
 #
-# MOISTURE GUIDE (PrevailingWindAngleDeg = 225 = SW trade winds by default):
-#   0.0 - 0.35 = dry / leeward / rain shadow
-#   0.35 - 0.65 = transitional / mixed
-#   0.65 - 1.0  = wet / windward / tropical
+# ELEVATION BANDS (tuned for raw masked noise -- no contrast stretch in chunk mode):
+#   0.00 - 0.18   deep ocean
+#   0.18 - 0.26   shallow water / reef
+#   0.26 - 0.34   beach / shoreline
+#   0.34 - 0.46   low land
+#   0.46 - 0.60   mid land
+#   0.60 - 0.74   highland
+#   0.74 - 1.00   peaks (impassable)
+#   1.00+         volcanic summit (stamped in code)
 #
-# ELEVATION BANDS (do NOT overlap between bands):
-#   0.00 - 0.22  deep water (ocean floor)
-#   0.22 - 0.30  shallow water / reef zone
-#   0.30 - 0.37  beach / shoreline  (coastal)
-#   0.37 - 0.52  low land           (plains, scrub, mangrove edges)
-#   0.52 - 0.68  mid land           (forest, grassland, savanna)
-#   0.68 - 0.82  highland           (hills, dense forest, cloud forest)
-#   0.82 - 1.00  peaks              (bare rock, volcanic summit)
+# MOISTURE:  0.0=dry/arid  0.5=mixed  1.0=wet/tropical
+# TEMPERATURE: 0.0=cold  0.5=temperate  1.0=tropical/hot
 
 schema: biome_defs.v1
 biomes:
 
-  # ── Ocean ─────────────────────────────────────────────────────────
+  # =========================================================
+  # OCEAN (elevation-only, no climate filter)
+  # =========================================================
+
   - id: base:deep_water
-    name: "Deep Water"
+    name: "Deep Ocean"
     tileId: base:water
     elevationMin: 0.00
-    elevationMax: 0.22
+    elevationMax: 0.18
     walkable: false
-    tags: [natural, liquid, ocean]
+    tags: [natural, liquid, ocean, deep]
 
   - id: base:shallow_water
     name: "Shallow Water"
     tileId: base:shallow_water
-    elevationMin: 0.22
-    elevationMax: 0.30
+    elevationMin: 0.18
+    elevationMax: 0.26
     walkable: false
     tags: [natural, liquid, shallow, coastal]
 
-  # ── Shoreline (0.30 - 0.37) ───────────────────────────────────────
-  # Catch-all: sandy beach (dry / leeward side)
+  # =========================================================
+  # SHORELINE  0.26 - 0.34
+  # =========================================================
+
+  # Catch-all: sandy beach
   - id: base:beach
     name: "Beach"
     tileId: base:beach
-    elevationMin: 0.30
-    elevationMax: 0.37
+    elevationMin: 0.26
+    elevationMax: 0.34
     moistureMin: 0.00
     moistureMax: 1.00
+    temperatureMin: 0.00
+    temperatureMax: 1.00
     walkable: true
     tags: [natural, coastal]
 
-  # Dry coast: rocky cliffs on exposed windward or high-falloff shores
+  # Dry leeward coast: rocky cliff (dry + any temp)
   - id: base:rocky_cliff
     name: "Rocky Cliffs"
     tileId: base:rocky_cliff
-    elevationMin: 0.30
-    elevationMax: 0.37
+    elevationMin: 0.26
+    elevationMax: 0.34
     moistureMin: 0.00
-    moistureMax: 0.35
+    moistureMax: 0.30
+    temperatureMin: 0.00
+    temperatureMax: 1.00
     walkable: false
     tags: [natural, coastal, cliff, impassable]
 
-  # Wet shoreline: windward coast grows mangroves instead of open sand
+  # Wet warm coast: mangroves (wet + warm)
   - id: base:mangrove_coast
     name: "Mangrove Coast"
     tileId: base:mangrove
-    elevationMin: 0.30
-    elevationMax: 0.37
-    moistureMin: 0.65
+    elevationMin: 0.26
+    elevationMax: 0.34
+    moistureMin: 0.60
     moistureMax: 1.00
+    temperatureMin: 0.55
+    temperatureMax: 1.00
     walkable: false
     tags: [natural, coastal, wet, dense]
 
-  # ── Low Land  (0.37 - 0.52) ───────────────────────────────────────
-  # Catch-all: dry scrubland (leeward / rain shadow floor)
+  # =========================================================
+  # LOW LAND  0.34 - 0.46
+  # =========================================================
+
+  # Catch-all: scrubland
   - id: base:scrubland
     name: "Scrubland"
     tileId: base:dirt
-    elevationMin: 0.37
-    elevationMax: 0.52
+    elevationMin: 0.34
+    elevationMax: 0.46
     moistureMin: 0.00
     moistureMax: 1.00
+    temperatureMin: 0.00
+    temperatureMax: 1.00
     walkable: true
     tags: [natural, arid, lowland]
 
-  # Transitional: open savanna / dry grassland
+  # Cold dry lowland: tundra scrub
+  - id: base:tundra
+    name: "Tundra"
+    tileId: base:dirt
+    elevationMin: 0.34
+    elevationMax: 0.46
+    moistureMin: 0.00
+    moistureMax: 0.45
+    temperatureMin: 0.00
+    temperatureMax: 0.35
+    walkable: true
+    tags: [natural, cold, lowland, arid]
+
+  # Cold wet lowland: cold marsh / boreal floor
+  - id: base:cold_marsh
+    name: "Cold Marsh"
+    tileId: base:grass
+    elevationMin: 0.34
+    elevationMax: 0.46
+    moistureMin: 0.55
+    moistureMax: 1.00
+    temperatureMin: 0.00
+    temperatureMax: 0.35
+    walkable: true
+    tags: [natural, cold, lowland, wet]
+
+  # Temperate dry lowland: savanna
   - id: base:savanna
     name: "Savanna"
     tileId: base:savanna
-    elevationMin: 0.37
-    elevationMax: 0.52
-    moistureMin: 0.30
-    moistureMax: 0.60
+    elevationMin: 0.34
+    elevationMax: 0.46
+    moistureMin: 0.20
+    moistureMax: 0.55
+    temperatureMin: 0.35
+    temperatureMax: 0.70
     walkable: true
     tags: [natural, temperate, lowland]
 
-  # Wet: tropical lowland / jungle floor
+  # Temperate wet lowland: grassland / meadow
+  - id: base:meadow
+    name: "Meadow"
+    tileId: base:grass
+    elevationMin: 0.34
+    elevationMax: 0.46
+    moistureMin: 0.45
+    moistureMax: 0.75
+    temperatureMin: 0.35
+    temperatureMax: 0.65
+    walkable: true
+    tags: [natural, temperate, lowland, wet]
+
+  # Hot dry lowland: desert scrub
+  - id: base:desert
+    name: "Desert"
+    tileId: base:dirt
+    elevationMin: 0.34
+    elevationMax: 0.46
+    moistureMin: 0.00
+    moistureMax: 0.30
+    temperatureMin: 0.65
+    temperatureMax: 1.00
+    walkable: true
+    tags: [natural, hot, arid, lowland]
+
+  # Hot wet lowland: tropical jungle floor
   - id: base:tropical_lowland
     name: "Tropical Lowland"
     tileId: base:jungle_floor
-    elevationMin: 0.37
-    elevationMax: 0.52
-    moistureMin: 0.60
+    elevationMin: 0.34
+    elevationMax: 0.46
+    moistureMin: 0.55
     moistureMax: 1.00
+    temperatureMin: 0.60
+    temperatureMax: 1.00
     walkable: true
     tags: [natural, tropical, wet, lowland]
 
-  # ── Mid Land  (0.52 - 0.68) ───────────────────────────────────────
-  # Catch-all: temperate grassland
+  # =========================================================
+  # MID LAND  0.46 - 0.60
+  # =========================================================
+
+  # Catch-all: grassland
   - id: base:grassland
     name: "Grassland"
     tileId: base:grass
-    elevationMin: 0.52
-    elevationMax: 0.68
+    elevationMin: 0.46
+    elevationMax: 0.60
     moistureMin: 0.00
     moistureMax: 1.00
+    temperatureMin: 0.00
+    temperatureMax: 1.00
     walkable: true
     tags: [natural, temperate, midland]
 
-  # Dry mid: dry forest / woodland
+  # Cold dry mid: boreal scrub / taiga edge
+  - id: base:boreal_scrub
+    name: "Boreal Scrub"
+    tileId: base:dirt
+    elevationMin: 0.46
+    elevationMax: 0.60
+    moistureMin: 0.00
+    moistureMax: 0.40
+    temperatureMin: 0.00
+    temperatureMax: 0.35
+    walkable: true
+    tags: [natural, cold, midland]
+
+  # Cold wet mid: boreal / taiga forest
+  - id: base:taiga
+    name: "Taiga"
+    tileId: base:dry_forest
+    elevationMin: 0.46
+    elevationMax: 0.60
+    moistureMin: 0.40
+    moistureMax: 1.00
+    temperatureMin: 0.00
+    temperatureMax: 0.35
+    walkable: true
+    tags: [natural, cold, midland, forest]
+
+  # Temperate dry mid: dry forest / woodland
   - id: base:dry_forest
     name: "Dry Forest"
     tileId: base:dry_forest
-    elevationMin: 0.52
-    elevationMax: 0.68
-    moistureMin: 0.25
+    elevationMin: 0.46
+    elevationMax: 0.60
+    moistureMin: 0.20
     moistureMax: 0.55
+    temperatureMin: 0.35
+    temperatureMax: 0.65
     walkable: true
     tags: [natural, temperate, midland, forest]
 
-  # Wet mid: dense rainforest
+  # Temperate wet mid: deciduous forest
+  - id: base:deciduous_forest
+    name: "Deciduous Forest"
+    tileId: base:rainforest
+    elevationMin: 0.46
+    elevationMax: 0.60
+    moistureMin: 0.45
+    moistureMax: 0.80
+    temperatureMin: 0.35
+    temperatureMax: 0.65
+    walkable: true
+    tags: [natural, temperate, midland, forest, dense]
+
+  # Hot dry mid: dry scrub / xeric woodland
+  - id: base:xeric_woodland
+    name: "Xeric Woodland"
+    tileId: base:savanna
+    elevationMin: 0.46
+    elevationMax: 0.60
+    moistureMin: 0.10
+    moistureMax: 0.45
+    temperatureMin: 0.65
+    temperatureMax: 1.00
+    walkable: true
+    tags: [natural, hot, midland, arid]
+
+  # Hot wet mid: tropical rainforest
   - id: base:rainforest
     name: "Rainforest"
     tileId: base:rainforest
-    elevationMin: 0.52
-    elevationMax: 0.68
+    elevationMin: 0.46
+    elevationMax: 0.60
     moistureMin: 0.55
     moistureMax: 1.00
+    temperatureMin: 0.60
+    temperatureMax: 1.00
     walkable: true
     tags: [natural, tropical, wet, midland, forest, dense]
 
-  # ── Highland  (0.68 - 0.82) ───────────────────────────────────────
-  # Catch-all: rocky highland / dirt hills
+  # =========================================================
+  # HIGHLAND  0.60 - 0.74
+  # =========================================================
+
+  # Catch-all: rocky highland
   - id: base:dirt_hills
-    name: "Dirt Hills"
+    name: "Rocky Highland"
     tileId: base:dirt
-    elevationMin: 0.68
-    elevationMax: 0.82
+    elevationMin: 0.60
+    elevationMax: 0.74
     moistureMin: 0.00
     moistureMax: 1.00
+    temperatureMin: 0.00
+    temperatureMax: 1.00
     walkable: true
     tags: [natural, highland]
 
-  # Dry highland: volcanic scrub / lava field edges
+  # Cold highland: alpine tundra
+  - id: base:alpine_tundra
+    name: "Alpine Tundra"
+    tileId: base:dirt
+    elevationMin: 0.60
+    elevationMax: 0.74
+    moistureMin: 0.00
+    moistureMax: 0.50
+    temperatureMin: 0.00
+    temperatureMax: 0.30
+    walkable: true
+    tags: [natural, cold, highland, alpine]
+
+  # Cold wet highland: alpine meadow / moss
+  - id: base:alpine_meadow
+    name: "Alpine Meadow"
+    tileId: base:grass
+    elevationMin: 0.60
+    elevationMax: 0.74
+    moistureMin: 0.40
+    moistureMax: 1.00
+    temperatureMin: 0.00
+    temperatureMax: 0.35
+    walkable: true
+    tags: [natural, cold, highland, wet]
+
+  # Dry volcanic highland
   - id: base:volcanic_scrub
     name: "Volcanic Scrub"
     tileId: base:volcanic_rock
-    elevationMin: 0.68
-    elevationMax: 0.82
+    elevationMin: 0.60
+    elevationMax: 0.74
     moistureMin: 0.00
     moistureMax: 0.40
+    temperatureMin: 0.30
+    temperatureMax: 1.00
     walkable: true
     tags: [natural, volcanic, highland, arid]
 
-  # Wet highland: cloud forest / misty ridge
+  # Wet tropical highland: cloud forest
   - id: base:cloud_forest
     name: "Cloud Forest"
     tileId: base:cloud_forest
-    elevationMin: 0.68
-    elevationMax: 0.82
-    moistureMin: 0.55
+    elevationMin: 0.60
+    elevationMax: 0.74
+    moistureMin: 0.50
     moistureMax: 1.00
+    temperatureMin: 0.35
+    temperatureMax: 1.00
     walkable: true
     tags: [natural, tropical, wet, highland, forest, dense]
 
-  # ── Peaks  (0.82 - 1.00) ──────────────────────────────────────────
-  # Catch-all: bare rock / mountain peaks (impassable)
+  # =========================================================
+  # PEAKS  0.74 - 1.00
+  # =========================================================
+
+  # Catch-all: mountain peaks (impassable)
   - id: base:mountains
     name: "Mountains"
     tileId: base:wall
-    elevationMin: 0.82
+    elevationMin: 0.74
     elevationMax: 1.00
+    moistureMin: 0.00
+    moistureMax: 1.00
+    temperatureMin: 0.00
+    temperatureMax: 1.00
     walkable: false
     tags: [natural, impassable, peak]
 
-  # Wet peak: moss-covered high crags -- still impassable but visually distinct
+  # Wet moss-covered peaks
   - id: base:mossy_peaks
     name: "Mossy Peaks"
     tileId: base:mossy_rock
-    elevationMin: 0.82
+    elevationMin: 0.74
     elevationMax: 1.00
-    moistureMin: 0.60
+    moistureMin: 0.55
     moistureMax: 1.00
+    temperatureMin: 0.00
+    temperatureMax: 0.55
     walkable: false
     tags: [natural, impassable, peak, wet]
 
-  # ── Volcano Summits  (stamped in code; elevation pushed above 1.0) ─────
+  # =========================================================
+  # VOLCANIC SUMMIT  (elevation pushed above 1.0 by stamping code)
+  # =========================================================
   - id: base:volcanic_summit
     name: "Volcanic Summit"
     tileId: base:volcanic_peak

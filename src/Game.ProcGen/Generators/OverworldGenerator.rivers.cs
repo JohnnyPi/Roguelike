@@ -29,8 +29,8 @@ public partial class OverworldGenerator
     /// </summary>
     private void CarveRivers(TileMap map, float[] elev, Random rng)
     {
-        const float sourceMinElev = 0.72f;
-        const float oceanThreshold = 0.28f;
+        const float sourceMinElev = 0.55f;
+        const float oceanThreshold = 0.25f;
         const float peakThreshold = 0.90f;  // don't paint rivers on extreme peaks
 
         bool[] riverMask = BuildRiverMask(elev, rng, sourceMinElev, oceanThreshold);
@@ -68,8 +68,8 @@ public partial class OverworldGenerator
     /// </summary>
     private void BuildRiverSet(float[] elev, Random rng, HashSet<(int, int)> riverSet)
     {
-        const float sourceMinElev = 0.72f;
-        const float oceanThreshold = 0.28f;
+        const float sourceMinElev = 0.55f;
+        const float oceanThreshold = 0.25f;
         const float peakThreshold = 0.90f;
 
         bool[] riverMask = BuildRiverMask(elev, rng, sourceMinElev, oceanThreshold);

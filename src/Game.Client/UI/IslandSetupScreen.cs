@@ -139,14 +139,16 @@ public sealed partial class IslandSetupScreen : IDisposable
     private const int SI_WIND_STR = 7;
     private const int SI_MOISTURE = 8;
     private const int SI_ISLANDS = 9;
-    private const int SI_VOLC = 10;
-    private const int SI_VOLC_RAD = 11;
-    private const int SI_RIVERS = 12;
+    private const int SI_CHAIN_CURVE = 10;
+    private const int SI_CHAIN_SEP = 11;
+    private const int SI_VOLC = 12;
+    private const int SI_VOLC_RAD = 13;
+    private const int SI_RIVERS = 14;
 
     private readonly List<SliderDef> _sliders = new()
     {
-        new SliderDef("Map Size",       64,   512,  256,  isInt: true,
-                      "Width and height in tiles (square map)"),
+        new SliderDef("Map Size",       64,   2048, 512,  isInt: true,
+                      "Width and height in tiles (wide chain maps auto-set height = width/2)"),
         new SliderDef("Frequency",      0.002f, 0.04f, 0.008f,
                       tooltip: "Base noise frequency. Lower = broader terrain features"),
         new SliderDef("Octaves",        1,    8,    6,    isInt: true,
@@ -163,8 +165,12 @@ public sealed partial class IslandSetupScreen : IDisposable
                       tooltip: "Rain shadow strength (0=off, 1=full)"),
         new SliderDef("Moisture Noise", 0.0f, 1.0f, 0.5f,
                       tooltip: "Blend noise into moisture (0=gradient only, 1=noisy)"),
-        new SliderDef("Islands",        1,    6,    1,    isInt: true,
-                      tooltip: "Number of islands in the chain (1=single, 2-6=archipelago)"),
+        new SliderDef("Islands",        1,    8,    1,    isInt: true,
+                      tooltip: "Number of islands in the chain (1=single, 2-8=archipelago)"),
+        new SliderDef("Chain Curve",    0.0f, 1.0f, 0.25f,
+                      tooltip: "Arc amount of the island chain (0=straight, 1=strong curve)"),
+        new SliderDef("Island Gap",     10,   200,  40,   isInt: true,
+                      tooltip: "Minimum ocean gap between island edges in tiles"),
         new SliderDef("Volcanoes",      0,    4,    1,    isInt: true,
                       tooltip: "Number of volcano cones to stamp"),
         new SliderDef("Volcano Radius", 20,   100,  60,   isInt: true,
@@ -400,15 +406,24 @@ public sealed partial class IslandSetupScreen : IDisposable
     private IslandGenConfig BuildConfig()
     {
         int sz = (int)Math.Round(_sliders[SI_SIZE].Value);
-        // Clamp to even numbers for symmetry
         if (sz % 2 != 0) sz++;
+
+        int islandCount = (int)Math.Round(_sliders[SI_ISLANDS].Value);
+
+        // For multi-island chains use a wide (2:1) map automatically.
+        // A 2:1 ratio gives the Bezier chain room to spread horizontally.
+        int mapW = sz;
+        int mapH = islandCount >= 3 ? Math.Max(64, sz / 2) : sz;
+
+        // Scale frequency down for larger maps so features remain proportional.
+        float baseFreq = _sliders[SI_FREQ].Value;
 
         return new IslandGenConfig
         {
             Seed = _seed,
-            MapWidth = sz,
-            MapHeight = sz,
-            Frequency = _sliders[SI_FREQ].Value,
+            MapWidth = mapW,
+            MapHeight = mapH,
+            Frequency = baseFreq,
             Octaves = (int)Math.Round(_sliders[SI_OCTAVES].Value),
             IslandRadiusScale = _sliders[SI_RADIUS].Value,
             IslandFalloffExp = _sliders[SI_FALLOFF].Value,
@@ -416,8 +431,10 @@ public sealed partial class IslandSetupScreen : IDisposable
             PrevailingWindAngleDeg = _sliders[SI_WIND_ANG].Value,
             WindGradientStrength = _sliders[SI_WIND_STR].Value,
             MoistureNoiseWeight = _sliders[SI_MOISTURE].Value,
-            IslandCount = (int)Math.Round(_sliders[SI_ISLANDS].Value),
-            EntranceCount = 3,
+            IslandCount = islandCount,
+            ChainCurveAmount = _sliders[SI_CHAIN_CURVE].Value,
+            MinIslandSeparation = (int)Math.Round(_sliders[SI_CHAIN_SEP].Value),
+            EntranceCount = Math.Max(1, islandCount),
             MinEntranceSpacing = Math.Max(20, sz / 8),
             MinEntranceFromSpawn = Math.Max(15, sz / 10),
             VolcanoCount = (int)Math.Round(_sliders[SI_VOLC].Value),

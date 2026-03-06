@@ -22,20 +22,21 @@ public sealed partial class IslandSetupScreen
     {
         var cfg = BuildConfig();
 
-        // Generate at preview resolution (fast -- no entity spawning, no TileMap)
-        // We use a small OverworldGenerator configured to PreviewSize x PreviewSize
-        // then sample its raw elevation+moisture to pick tile colors without
-        // allocating a full TileMap. Since OverworldGenerator.Generate() is the
-        // only public surface, we generate at reduced size and scale frequency.
         int sz = PreviewSize;
-        float freqScale = (float)sz / cfg.MapWidth;
+        // Preserve aspect ratio so wide chain maps don't look squished in the preview.
+        float aspect = (float)cfg.MapWidth / cfg.MapHeight;
+        int previewW = sz;
+        int previewH = Math.Max(1, (int)(sz / aspect));
+        if (previewH > sz) { previewH = sz; previewW = Math.Max(1, (int)(sz * aspect)); }
+
+        float freqScale = (float)previewW / cfg.MapWidth;
 
         var previewGen = OverworldGenerator.FromConfig(cfg with
         {
-            MapWidth = sz,
-            MapHeight = sz,
+            MapWidth = previewW,
+            MapHeight = previewH,
             Frequency = cfg.Frequency * freqScale,
-            EntranceCount = 0,          // no entrance placement needed
+            EntranceCount = 0,
             VolcanoBaseRadius = Math.Max(4, (int)(cfg.VolcanoBaseRadius * freqScale)),
         });
 
@@ -51,27 +52,29 @@ public sealed partial class IslandSetupScreen
             previewMap = previewGen.Generate(tileDict, _seed);
         }
 
-        // Sample tile colors into pixel array
+        // Sample tile colors into pixel array (centered in 256x256 texture)
         var pixels = new Color[sz * sz];
-        for (int y = 0; y < sz; y++)
+        int offsetX = (sz - previewW) / 2;
+        int offsetY = (sz - previewH) / 2;
+        for (int y = 0; y < previewH; y++)
         {
-            for (int x = 0; x < sz; x++)
+            for (int x = 0; x < previewW; x++)
             {
                 var tile = previewMap.GetTile(x, y);
-                pixels[y * sz + x] = tile != null
+                pixels[(y + offsetY) * sz + (x + offsetX)] = tile != null
                     ? GetCachedTileColor(tile)
                     : Color.Black;
             }
         }
 
-        // Mark spawn and entrances
+        // Mark spawn and entrances (shift coordinates by preview offset)
         var spawnColor = new Color(0, 255, 255, 255);
-        MarkDot(pixels, sz, previewGen.SpawnPosition.X, previewGen.SpawnPosition.Y,
+        MarkDot(pixels, sz, previewGen.SpawnPosition.X + offsetX, previewGen.SpawnPosition.Y + offsetY,
                 spawnColor, 3);
         foreach (var ep in previewGen.EntrancePositions)
-            MarkDot(pixels, sz, ep.X, ep.Y, new Color(255, 60, 60, 255), 3);
+            MarkDot(pixels, sz, ep.X + offsetX, ep.Y + offsetY, new Color(255, 60, 60, 255), 3);
         foreach (var vp in previewGen.VolcanoCenters)
-            MarkDot(pixels, sz, vp.X, vp.Y, new Color(255, 120, 30, 255), 2);
+            MarkDot(pixels, sz, vp.X + offsetX, vp.Y + offsetY, new Color(255, 120, 30, 255), 2);
 
         _previewTex.SetData(pixels);
     }

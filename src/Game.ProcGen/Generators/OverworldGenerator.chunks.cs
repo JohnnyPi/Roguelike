@@ -27,7 +27,7 @@ namespace Game.ProcGen.Generators;
 
 public partial class OverworldGenerator
 {
-    // ── Noise context ─────────────────────────────────────────────────
+    // -- Noise context ---------------------------------------------------------
 
     /// <summary>
     /// Cached noise objects for per-chunk generation.
@@ -39,32 +39,41 @@ public partial class OverworldGenerator
         public FastNoiseLite ElevNoise { get; }
         public FastNoiseLite WarpNoise { get; }
         public FastNoiseLite MoistNoise { get; }
+        public FastNoiseLite TempNoise { get; }
         public int Seed { get; }
         public int WorldWidth { get; }
         public int WorldHeight { get; }
-        /// <summary>Island center list (cx, cy, radius). Built once; used by each chunk.</summary>
         public (float cx, float cy, float radius)[] IslandCenters { get; }
+        public float[] WindAngles { get; }
+        /// <summary>Per-island base temperature (0..1). High = tropical, Low = cold.</summary>
+        public float[] BaseTempArr { get; }
 
         internal ChunkNoiseContext(
             FastNoiseLite elevNoise,
             FastNoiseLite warpNoise,
             FastNoiseLite moistNoise,
+            FastNoiseLite tempNoise,
             int seed,
             int worldWidth,
             int worldHeight,
-            (float, float, float)[] islandCenters)
+            (float, float, float)[] islandCenters,
+            float[] windAngles,
+            float[] baseTempArr)
         {
             ElevNoise = elevNoise;
             WarpNoise = warpNoise;
             MoistNoise = moistNoise;
+            TempNoise = tempNoise;
             Seed = seed;
             WorldWidth = worldWidth;
             WorldHeight = worldHeight;
             IslandCenters = islandCenters;
+            WindAngles = windAngles;
+            BaseTempArr = baseTempArr;
         }
     }
 
-    // ── Context factory ───────────────────────────────────────────────
+    // -- Context factory -------------------------------------------------------
 
     /// <summary>
     /// Build and cache the noise objects required by GenerateChunk.
@@ -76,44 +85,36 @@ public partial class OverworldGenerator
         var elevNoise = ConfigureElevationNoise(seed);
         var warpNoise = ConfigureWarpNoise(seed + 7919);
         var moistNoise = ConfigureMoistureNoise(seed + 31337);
+        var tempNoise = ConfigureTemperatureNoise(seed + 54321);
 
-        // Build island centers using same logic as BuildMaskedElevation
-        int count = Math.Max(1, IslandCount);
-        var centers = new (float, float, float)[count];
-        float mapCx = MapWidth * 0.5f;
-        float mapCy = MapHeight * 0.5f;
+        // Use the canonical Bezier placement so chunks match the full Generate() pass exactly.
+        var centers = BuildIslandCenters(rng);
 
-        if (count == 1)
+        // Per-island wind angles -- same jitter logic as BuildMoistureField.
+        // Use a fresh rng seeded identically so the angles match the full-map pass.
+        var windRng = new Random(seed);
+        var windAngles = new float[centers.Length];
+        for (int i = 0; i < centers.Length; i++)
         {
-            float r = MathF.Min(mapCx, mapCy) * IslandRadiusScale;
-            centers[0] = (mapCx, mapCy, r);
-        }
-        else
-        {
-            float chainRadiusFrac = IslandRadiusScale * 0.55f;
-            float halfMap = MathF.Min(mapCx, mapCy);
-            float spread = halfMap * 1.1f;
-            float chainAngle = (float)(rng.NextDouble() * MathF.PI);
-
-            for (int i = 0; i < count; i++)
-            {
-                float t = count == 1 ? 0f : (float)i / (count - 1);
-                float offset = (t - 0.5f) * spread;
-                float cx = mapCx + MathF.Cos(chainAngle) * offset;
-                float cy = mapCy + MathF.Sin(chainAngle) * offset;
-                float ageFactor = 0.75f + 0.5f * (float)rng.NextDouble();
-                float r = MathF.Min(mapCx, mapCy) * chainRadiusFrac * ageFactor;
-                cx = Math.Clamp(cx, r + 4, MapWidth - r - 4);
-                cy = Math.Clamp(cy, r + 4, MapHeight - r - 4);
-                centers[i] = (cx, cy, r);
-            }
+            float jitter = (float)(windRng.NextDouble() - 0.5) * 60f;
+            windAngles[i] = PrevailingWindAngleDeg + jitter;
         }
 
-        return new ChunkNoiseContext(elevNoise, warpNoise, moistNoise, seed,
-                                     MapWidth, MapHeight, centers);
+        // Per-island base temperature -- mirrors BuildTemperatureField exactly.
+        // Sample broad noise at each island center, bias toward warm (0.40..0.90).
+        var baseTempArr = new float[centers.Length];
+        for (int i = 0; i < centers.Length; i++)
+        {
+            var (icx, icy, _) = centers[i];
+            float n = (tempNoise.GetNoise(icx, icy) + 1f) * 0.5f;
+            baseTempArr[i] = 0.40f + n * 0.50f;
+        }
+
+        return new ChunkNoiseContext(elevNoise, warpNoise, moistNoise, tempNoise, seed,
+                                     MapWidth, MapHeight, centers, windAngles, baseTempArr);
     }
 
-    // ── Per-chunk generation ──────────────────────────────────────────
+    // -- Per-chunk generation --------------------------------------------------
 
     /// <summary>
     /// Generate a single 64x64 WorldChunk by sampling the global noise field at
@@ -150,16 +151,9 @@ public partial class OverworldGenerator
         int originX = chunkX * cs;
         int originY = chunkY * cs;
 
-        float worldCx = ctx.WorldWidth * 0.5f;
-        float worldCy = ctx.WorldHeight * 0.5f;
-
-        // Wind direction (same formula as BuildMoistureField)
-        float windRad = PrevailingWindAngleDeg * MathF.PI / 180f;
-        float windDx = MathF.Sin(windRad);
-        float windDy = -MathF.Cos(windRad);
-        float halfSpan = MathF.Min(worldCx, worldCy) * IslandRadiusScale;
-
+        // Wind direction precomputed per-island (stored in context)
         var islandCenters = ctx.IslandCenters;
+        var windAngles = ctx.WindAngles;
 
         for (int ly = 0; ly < cs; ly++)
         {
@@ -168,37 +162,79 @@ public partial class OverworldGenerator
                 int wx = originX + lx;
                 int wy = originY + ly;
 
-                // ── Elevation ──────────────────────────────────────────
+                // -- Elevation ------------------------------------------------
                 float raw = (ctx.ElevNoise.GetNoise(wx, wy) + 1f) * 0.5f;
 
+                // Two-layer domain warp for organic coastlines (matches BuildMaskedElevationFromCenters)
                 float warpX = (ctx.WarpNoise.GetNoise(wx * 1.3f, wy * 0.9f) + 1f) * 0.5f - 0.5f;
                 float warpY = (ctx.WarpNoise.GetNoise(wx * 0.9f + 100f, wy * 1.3f + 100f) + 1f) * 0.5f - 0.5f;
+                float warpX2 = (ctx.WarpNoise.GetNoise(wx * 2.7f + 300f, wy * 2.1f + 200f) + 1f) * 0.5f - 0.5f;
+                float warpY2 = (ctx.WarpNoise.GetNoise(wx * 2.1f + 200f, wy * 2.7f + 300f) + 1f) * 0.5f - 0.5f;
 
-                // Multi-island mask: best (highest) mask across all island centers
                 float bestMask = 0f;
                 foreach (var (icx, icy, maxRadius) in islandCenters)
                 {
-                    float warpedX = (wx - icx) + warpX * maxRadius * CoastWarpStrength;
-                    float warpedY = (wy - icy) + warpY * maxRadius * CoastWarpStrength;
+                    float warpedX = (wx - icx) + (warpX * 0.7f + warpX2 * 0.3f) * maxRadius * CoastWarpStrength;
+                    float warpedY = (wy - icy) + (warpY * 0.7f + warpY2 * 0.3f) * maxRadius * CoastWarpStrength;
                     float dist = MathF.Sqrt(warpedX * warpedX + warpedY * warpedY);
                     float t = dist / maxRadius;
                     float mask = 1f - MathF.Pow(Math.Clamp(t, 0f, 1f), IslandFalloffExp);
                     if (mask > bestMask) bestMask = mask;
                 }
+                // Note: chunk elevation is NOT contrast-stretched per-chunk (that's a global pass).
+                // For chunk-streamed maps the raw*mask value is used; visual biome transitions
+                // are handled by the biome thresholds being set relative to the raw range.
                 float elev = raw * bestMask;
 
-                // ── Moisture ──────────────────────────────────────────
-                float dx = wx - worldCx;
-                float dy = wy - worldCy;
-                float dot = dx * windDx + dy * windDy;
-                float gradient = Math.Clamp((dot / halfSpan) * 0.5f + 0.5f, 0f, 1f);
+                // -- Moisture (per-island weighted average) --------------------
                 float noiseM = (ctx.MoistNoise.GetNoise(wx, wy) + 1f) * 0.5f;
-                float blended = gradient * (1f - MoistureNoiseWeight) + noiseM * MoistureNoiseWeight;
-                float mois = Math.Clamp(noiseM + (blended - noiseM) * WindGradientStrength, 0f, 1f);
+                float weightedMoist = 0f;
+                float totalWeight = 0f;
+
+                for (int i = 0; i < islandCenters.Length; i++)
+                {
+                    var (icx, icy, ir) = islandCenters[i];
+                    float dx = wx - icx;
+                    float dy = wy - icy;
+                    float dist = MathF.Sqrt(dx * dx + dy * dy);
+                    float t = dist / ir;
+                    float mask = Math.Clamp(1f - MathF.Pow(Math.Clamp(t, 0f, 1f), IslandFalloffExp), 0f, 1f);
+                    if (mask <= 0.001f) continue;
+
+                    float windRad = windAngles[i] * MathF.PI / 180f;
+                    float dot = dx * MathF.Sin(windRad) + dy * -MathF.Cos(windRad);
+                    float gradient = Math.Clamp((dot / ir) * 0.5f + 0.5f, 0f, 1f);
+                    float blended = gradient * (1f - MoistureNoiseWeight) + noiseM * MoistureNoiseWeight;
+                    float lm = Math.Clamp(noiseM + (blended - noiseM) * WindGradientStrength, 0f, 1f);
+
+                    weightedMoist += lm * mask;
+                    totalWeight += mask;
+                }
+                float mois = totalWeight < 0.001f ? 0.5f : weightedMoist / totalWeight;
+
+                // -- Temperature (lapse rate + per-island base) ----------------
+                float wTemp2 = 0f, wTotal2 = 0f;
+                var baseTempArr = ctx.BaseTempArr;
+                for (int i = 0; i < islandCenters.Length; i++)
+                {
+                    var (icx, icy, ir) = islandCenters[i];
+                    float dx = wx - icx;
+                    float dy = wy - icy;
+                    float dist = MathF.Sqrt(dx * dx + dy * dy);
+                    float t = dist / ir;
+                    float mask = Math.Clamp(1f - MathF.Pow(Math.Clamp(t, 0f, 1f), IslandFalloffExp), 0f, 1f);
+                    if (mask <= 0.001f) continue;
+                    wTemp2 += baseTempArr[i] * mask;
+                    wTotal2 += mask;
+                }
+                float baseTemp = wTotal2 < 0.001f ? 0.5f : wTemp2 / wTotal2;
+                float aboveWater = Math.Max(0f, elev - WaterThreshold);
+                float lapseSpan = 1f - WaterThreshold;
+                float temp = Math.Clamp(baseTemp - 0.70f * (aboveWater / lapseSpan), 0f, 1f);
 
                 chunk.SetElevation(lx, ly, elev);
 
-                // ── Tile assignment ────────────────────────────────────
+                // -- Tile assignment -------------------------------------------
                 var key = (wx, wy);
                 string tileId;
 
@@ -209,7 +245,7 @@ public partial class OverworldGenerator
                 else if (entrancePositions != null && entrancePositions.Contains(key)) tileId = EntranceTile;
                 else
                     tileId = biomes != null && biomes.Count > 0
-                        ? ElevationMoistureToTile(elev, mois, biomes)
+                        ? ElevationMoistureTempToTile(elev, mois, temp, biomes)
                         : ElevationToTileLegacy(elev);
 
                 chunk.SetStaticTileId(lx, ly, tileId);

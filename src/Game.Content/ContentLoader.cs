@@ -296,6 +296,8 @@ public sealed class ContentLoader
                         ElevationMax = yb.ElevationMax,
                         MoistureMin = yb.MoistureMin,
                         MoistureMax = yb.MoistureMax,
+                        TemperatureMin = yb.TemperatureMin,
+                        TemperatureMax = yb.TemperatureMax,
                         Walkable = yb.Walkable,
                         Tags = yb.Tags
                     };

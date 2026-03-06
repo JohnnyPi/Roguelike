@@ -59,6 +59,7 @@ public partial class OverworldGenerator
     /// </summary>
     public static OverworldGenerator FromConfig(IslandGenConfig cfg) => new()
     {
+        Seed = cfg.Seed,
         MapWidth = cfg.MapWidth,
         MapHeight = cfg.MapHeight,
         Frequency = cfg.Frequency,
@@ -67,6 +68,8 @@ public partial class OverworldGenerator
         Gain = cfg.Gain,
         RiverCount = cfg.RiverCount,
         IslandCount = cfg.IslandCount,
+        ChainCurveAmount = cfg.ChainCurveAmount,
+        MinIslandSeparation = cfg.MinIslandSeparation,
         IslandRadiusScale = cfg.IslandRadiusScale,
         IslandFalloffExp = cfg.IslandFalloffExp,
         CoastWarpStrength = cfg.CoastWarpStrength,
@@ -86,6 +89,9 @@ public partial class OverworldGenerator
 
     // ── Noise configuration ──────────────────────────────────────────
 
+    /// <summary>RNG seed. Null = use Environment.TickCount at generate time.</summary>
+    public int? Seed { get; init; } = null;
+
     public int MapWidth { get; init; } = 512;
     public int MapHeight { get; init; } = 512;
     public float Frequency { get; init; } = 0.008f;
@@ -95,8 +101,12 @@ public partial class OverworldGenerator
 
     // ── Island count (archipelago) ────────────────────────────────────
 
-    /// <summary>Number of islands in the chain. 1 = single island, 2-6 = archipelago.</summary>
+    /// <summary>Number of islands in the chain. 1 = single island, 2-8 = archipelago.</summary>
     public int IslandCount { get; init; } = 1;
+    /// <summary>Bezier arc amount for the island chain. 0 = straight line, 1 = strong curve.</summary>
+    public float ChainCurveAmount { get; init; } = 0.25f;
+    /// <summary>Minimum gap in tiles between island edges. Prevents islands merging.</summary>
+    public int MinIslandSeparation { get; init; } = 40;
 
     // ── Island shape ─────────────────────────────────────────────────
 
@@ -217,14 +227,18 @@ public partial class OverworldGenerator
         var elevNoise = ConfigureElevationNoise(actualSeed);
         var warpNoise = ConfigureWarpNoise(actualSeed + 7919);
         var moistNoise = ConfigureMoistureNoise(actualSeed + 31337);
+        var tempNoise = ConfigureTemperatureNoise(actualSeed + 53891);
 
-        float[] maskedElevation = BuildMaskedElevation(elevNoise, warpNoise, rng);
+        var islandCenters = BuildIslandCenters(rng);
 
-        // Stamp volcanoes onto the elevation field before tile assignment.
-        // Also builds the lava overlay used during tile write.
+        rng = new Random(actualSeed);
+        float[] maskedElevation = BuildMaskedElevationFromCenters(elevNoise, warpNoise, islandCenters);
+
         var (lavaOverlay, craterOverlay) = StampVolcanoesWithOverlays(maskedElevation, rng);
 
-        float[] moisture = BuildMoistureField(moistNoise, maskedElevation);
+        rng = new Random(actualSeed);
+        float[] moisture = BuildMoistureField(moistNoise, maskedElevation, islandCenters, rng);
+        float[] temperature = BuildTemperatureField(tempNoise, maskedElevation, islandCenters, rng);
 
         for (int y = 0; y < MapHeight; y++)
         {
@@ -233,6 +247,7 @@ public partial class OverworldGenerator
                 int i = y * MapWidth + x;
                 float elev = maskedElevation[i];
                 float mois = moisture[i];
+                float temp = temperature[i];
 
                 string tileId;
                 if (craterOverlay[i])
@@ -240,7 +255,7 @@ public partial class OverworldGenerator
                 else if (lavaOverlay[i])
                     tileId = LavaTile;
                 else
-                    tileId = ElevationMoistureToTile(elev, mois, biomes);
+                    tileId = ElevationMoistureTempToTile(elev, mois, temp, biomes);
 
                 map.SetTile(x, y, tileId);
                 map.SetElevation(x, y, elev);
@@ -293,53 +308,71 @@ public partial class OverworldGenerator
     // ── Tile assignment ───────────────────────────────────────────────
 
     /// <summary>
-    /// Two-axis biome lookup: elevation + moisture.
+    /// Three-axis biome lookup: elevation x moisture x temperature.
     ///
     /// Algorithm:
-    ///   1. Collect all biomes where elevationMin &lt;= elev &lt; elevationMax.
-    ///   2. Among those, pick the first whose moistureMin &lt;= mois &lt;= moistureMax.
-    ///   3. If none match moisture, fall back to the last elevation-matching biome
-    ///      (which should be defined as a catch-all with moisture 0..1).
-    ///
-    /// This means biomes must be ordered in YAML so:
-    ///   - Water/beach/peak biomes appear at the top of their elevation band (catch-all).
-    ///   - Moisture-specific variants follow them, ordered dry-to-wet or wet-to-dry.
+    ///   1. Restrict to biomes whose elevation range contains the sampled value.
+    ///   2. Among those, score each biome by how well moisture AND temperature fit.
+    ///      A biome that spans the full range on an axis (0..1) contributes 0 penalty.
+    ///      A biome whose range does NOT contain the sampled value is excluded.
+    ///   3. Among all matching biomes, pick the one with the narrowest combined
+    ///      moisture+temperature range (most specific). This naturally prefers
+    ///      climate-specific biomes over catch-all entries.
+    ///   4. Fall back to the widest-range (catch-all) biome in the elevation band.
     /// </summary>
-    private static string ElevationMoistureToTile(
-        float elevation,
-        float moisture,
+    private static string ElevationMoistureTempToTile(
+        float elevation, float moisture, float temperature,
         IReadOnlyList<BiomeDef> biomes)
     {
         BiomeDef? catchAll = null;
         BiomeDef? specific = null;
-        float bestRange = float.MaxValue;
+        float bestScore = float.MaxValue;
+        float catchAllRange = float.MinValue;
 
         for (int i = 0; i < biomes.Count; i++)
         {
             var b = biomes[i];
 
-            if (elevation < b.ElevationMin || elevation >= b.ElevationMax)
-                continue;
+            if (elevation < b.ElevationMin || elevation >= b.ElevationMax) continue;
+            if (moisture < b.MoistureMin || moisture > b.MoistureMax) continue;
+            if (temperature < b.TemperatureMin || temperature > b.TemperatureMax) continue;
 
-            if (moisture >= b.MoistureMin && moisture <= b.MoistureMax)
+            // Specificity score: narrower ranges = more specific = lower score = preferred
+            float moistRange = b.MoistureMax - b.MoistureMin;
+            float tempRange = b.TemperatureMax - b.TemperatureMin;
+            float score = moistRange + tempRange;
+
+            if (score < bestScore)
             {
-                float range = b.MoistureMax - b.MoistureMin;
-                // Prefer the narrowest (most specific) moisture match
-                if (range < bestRange)
-                {
-                    bestRange = range;
-                    specific = b;
-                }
-                // Track the widest as catch-all fallback
-                if (catchAll == null || range > (catchAll.MoistureMax - catchAll.MoistureMin))
-                    catchAll = b;
+                bestScore = score;
+                specific = b;
+            }
+
+            // Track widest (catch-all) as fallback
+            if (score > catchAllRange)
+            {
+                catchAllRange = score;
+                catchAll = b;
             }
         }
 
         if (specific != null) return specific.TileId;
         if (catchAll != null) return catchAll.TileId;
+
+        // Last resort: first elevation-matching biome regardless of climate axes
+        for (int i = 0; i < biomes.Count; i++)
+        {
+            var b = biomes[i];
+            if (elevation >= b.ElevationMin && elevation < b.ElevationMax)
+                return b.TileId;
+        }
         return biomes[biomes.Count - 1].TileId;
     }
+
+    // Keep old two-axis version for legacy callers
+    private static string ElevationMoistureToTile(
+        float elevation, float moisture, IReadOnlyList<BiomeDef> biomes)
+        => ElevationMoistureTempToTile(elevation, moisture, 0.5f, biomes);
 
     private string ElevationToTileLegacy(float elevation)
     {

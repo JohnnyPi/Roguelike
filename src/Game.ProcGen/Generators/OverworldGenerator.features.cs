@@ -41,9 +41,12 @@ public partial class OverworldGenerator
 
         var elevNoise = ConfigureElevationNoise(seed);
         var warpNoise = ConfigureWarpNoise(seed + 7919);
-        var moistNoise = ConfigureMoistureNoise(seed + 31337);
 
-        float[] maskedElevation = BuildMaskedElevation(elevNoise, warpNoise, rng);
+        // Use the same island center path as BuildNoiseContext so features
+        // (rivers, volcanoes, entrances) land on the same terrain that chunk
+        // generation will produce.
+        var centers = BuildIslandCenters(rng);
+        float[] maskedElevation = BuildMaskedElevationFromCenters(elevNoise, warpNoise, centers);
         var (lavaOverlay, craterOverlay) = StampVolcanoesWithOverlays(maskedElevation, rng);
 
         // Build river mask using same logic as CarveRivers but into a set
