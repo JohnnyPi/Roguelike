@@ -249,7 +249,7 @@ public sealed class PathController
     /// TODO: swap internals for GoRogue AStar once it's wired to the map adapter.
     /// The public PathController API does not need to change.
     /// </summary>
-    private static List<Point>? FindPath(Point from, Point to, TileMap map)
+    private static List<Point>? FindPath(Point from, Point to, IWorldMap map)
     {
         if (from == to) return new List<Point>();
 

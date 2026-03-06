@@ -57,6 +57,7 @@ public sealed class InputBindings
         b.Bind(GameAction.Wait, Keys.Space);
 
         b.Bind(GameAction.ToggleInventory, Keys.I);
+        b.Bind(GameAction.ToggleMinimap, Keys.M);
 
         b.Bind(GameAction.Quit, Keys.Escape);
         b.Bind(GameAction.RegenerateWorld, Keys.R);

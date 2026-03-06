@@ -37,6 +37,7 @@ using Game.Core.Items;
 using Game.Core.Map;
 using Microsoft.Xna.Framework;
 using Microsoft.Xna.Framework.Graphics;
+using Microsoft.Xna.Framework.Input;
 using Myra;
 using Myra.Graphics2D;
 using Myra.Graphics2D.Brushes;
@@ -48,7 +49,7 @@ using System.Collections.Generic;
 
 namespace Game.Client.UI;
 
-public sealed class HudManager
+public sealed partial class HudManager
 {
     private readonly Desktop _desktop;
 
@@ -103,10 +104,28 @@ public sealed class HudManager
     //  transparent border panel that appears only when HP < 30%.
     private readonly Panel _dangerVignette;
 
-    // ── Minimap ──────────────────────────────────────────────────────────────────
-    private const int MinimapSize = 160;     // total minimap panel pixel size
-    private const int MinimapBorder = 4;     // border padding inside panel
-    private const int MinimapTileMinPx = 1;  // minimum px per tile (1 = can show 120x120 map)
+    // ── Minimap ──────────────────────────────────────────────────────────────
+    private const int MinimapSize = 220;      // map render area in pixels
+    private const int MinimapBorder = 6;      // inner padding
+    private const int MinimapTitleH = 20;     // title bar height
+    private const int MinimapTileMinPx = 1;
+
+    // Minimap window state
+    private bool _minimapVisible = false;
+    private int _minimapWindowX = 10;         // top-left of the window
+    private int _minimapWindowY = 10;
+    private bool _minimapDragging = false;
+    private int _minimapDragOffX, _minimapDragOffY;
+
+    // Input state for minimap drag
+    private MouseState _prevMinimapMouse;
+
+    public bool IsMinimapVisible => _minimapVisible;
+
+    public void ToggleMinimap()
+    {
+        _minimapVisible = !_minimapVisible;
+    }
 
     public HudManager(InputBindings bindings)
     {
@@ -369,7 +388,8 @@ public sealed class HudManager
             Text = InputBindings.HintLine(bindings,
                 (GameAction.MoveNorth, "Move"),
                 (GameAction.Interact, "Interact"),
-                (GameAction.ToggleInventory, "Inventory"),
+                (GameAction.ToggleInventory, "Inv"),
+                (GameAction.ToggleMinimap, "Map"),
                 (GameAction.Wait, "Wait"),
                 (GameAction.RegenerateWorld, "Regen"),
                 (GameAction.Quit, "Quit")),
@@ -578,76 +598,5 @@ public sealed class HudManager
 
             _inventoryList.Widgets.Add(row);
         }
-    }
-
-    /// <summary>
-    /// Draw the minimap directly via SpriteBatch (called from Game1.Draw before spriteBatch.End).
-    /// Renders top-right corner below the mode panel.
-    /// Shows overworld or dungeon depending on current mode.
-    /// Explored tiles = dim, Visible tiles = full color, Player = white dot.
-    /// </summary>
-    public void DrawMinimap(SpriteBatch spriteBatch, GameState state, Texture2D pixel)
-    {
-        if (state?.ActiveMap == null || state.Player == null) return;
-
-        var map = state.ActiveMap;
-        int mapW = map.Width;
-        int mapH = map.Height;
-
-        // Compute px per tile to fit in MinimapSize
-        float tpx = Math.Min(
-            (MinimapSize - MinimapBorder * 2) / (float)mapW,
-            (MinimapSize - MinimapBorder * 2) / (float)mapH);
-        int tilePx = Math.Max(1, (int)tpx);
-
-        int drawW = mapW * tilePx;
-        int drawH = mapH * tilePx;
-
-        // Panel top-right, below mode indicator (~120px from top)
-        int viewport = spriteBatch.GraphicsDevice.Viewport.Width;
-        int panelX = viewport - drawW - MinimapBorder * 2 - 8;
-        int panelY = 120;
-
-        // Dark panel background
-        spriteBatch.Draw(pixel,
-            new Rectangle(panelX, panelY, drawW + MinimapBorder * 2, drawH + MinimapBorder * 2),
-            new Color(0, 0, 0, 200));
-
-        int ox = panelX + MinimapBorder;
-        int oy = panelY + MinimapBorder;
-
-        // Draw explored and visible tiles
-        for (int y = 0; y < mapH; y++)
-        {
-            for (int x = 0; x < mapW; x++)
-            {
-                bool vis = map.Visibility?.IsVisible(x, y) ?? true;
-                bool exp = map.Visibility?.IsExplored(x, y) ?? true;
-                if (!exp) continue;
-
-                var tileColor = ParseMinimapTileColor(map, x, y);
-                if (!vis) tileColor = new Color((int)(tileColor.R * 0.35f), (int)(tileColor.G * 0.35f), (int)(tileColor.B * 0.35f), 200);
-                else tileColor = new Color((int)tileColor.R, (int)tileColor.G, (int)tileColor.B, 255);
-
-                spriteBatch.Draw(pixel,
-                    new Rectangle(ox + x * tilePx, oy + y * tilePx, tilePx, tilePx),
-                    tileColor);
-            }
-        }
-
-        // Player dot — bright white, slightly larger than tile
-        int px = ox + state.Player.X * tilePx;
-        int py = oy + state.Player.Y * tilePx;
-        int dotSize = Math.Max(2, tilePx + 1);
-        spriteBatch.Draw(pixel,
-            new Rectangle(px - dotSize / 2, py - dotSize / 2, dotSize, dotSize),
-            Color.White);
-    }
-
-    private static Color ParseMinimapTileColor(TileMap map, int x, int y)
-    {
-        var def = map.GetTile(x, y);
-        if (def == null) return Color.Black;
-        return TileRenderer.ParseHexColor(def.Color);
     }
 }

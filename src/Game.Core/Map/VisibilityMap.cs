@@ -35,6 +35,11 @@ public sealed class VisibilityMap
 
     private readonly RecursiveShadowcastingFOV _fov;
 
+    // Bounds of the last Recompute call -- used to clear only the previous
+    // visible region rather than the entire map array.
+    private int _prevX0, _prevY0, _prevX1, _prevY1;
+    private bool _hasPrev;
+
     // ── Construction ────────────────────────────────────────────────
 
     /// <summary>
@@ -84,32 +89,46 @@ public sealed class VisibilityMap
     /// </summary>
     public void Recompute(int originX, int originY, int radius)
     {
-        // Clear previous visible set (explored is never cleared)
-        Array.Clear(_visible, 0, _visible.Length);
+        // Clear only the region that was visible last turn (avoids full-map memset).
+        if (_hasPrev)
+        {
+            for (int y = _prevY0; y <= _prevY1; y++)
+                for (int x = _prevX0; x <= _prevX1; x++)
+                    _visible[y * Width + x] = false;
+        }
+        else
+        {
+            Array.Clear(_visible, 0, _visible.Length); // first call only
+        }
 
         // GoRogue FOV compute — fills its internal ResultView
         _fov.Calculate(originX, originY, radius, Distance.Euclidean);
 
-        // Copy results into our flat arrays and accumulate explored
-        for (int y = 0; y < Height; y++)
+        // Copy results into our flat arrays and accumulate explored.
+        // Only scan the bounding box around the FOV origin -- avoids iterating
+        // the entire (potentially 512x512) map on every player move.
+        int x0 = Math.Max(0, originX - radius - 1);
+        int y0 = Math.Max(0, originY - radius - 1);
+        int x1 = Math.Min(Width - 1, originX + radius + 1);
+        int y1 = Math.Min(Height - 1, originY + radius + 1);
+
+        for (int y = y0; y <= y1; y++)
         {
-            for (int x = 0; x < Width; x++)
+            for (int x = x0; x <= x1; x++)
             {
-                bool lit = _fov.NewlySeen.Contains(new Point(x, y))
-                        || _fov.CurrentFOV.Contains(new Point(x, y));
-
-                // Also check the FOV's bool grid view directly
-                lit = _fov.BooleanResultView[x, y];
-
+                bool lit = _fov.BooleanResultView[x, y];
                 int idx = y * Width + x;
                 _visible[idx] = lit;
                 if (lit) _explored[idx] = true;
             }
+            // Store bounds for next call's targeted clear
+            _prevX0 = x0; _prevY0 = y0;
+            _prevX1 = x1; _prevY1 = y1;
+            _hasPrev = true;
         }
     }
-
-    /// <summary>
-    /// Force-mark a single tile as explored (e.g. map reveal items, entrance tile).
+    /// (e.g.map reveal items, entrance tile).
+    
     /// Does not mark it visible.
     /// </summary>
     public void MarkExplored(int x, int y)
@@ -129,6 +148,7 @@ public sealed class VisibilityMap
     {
         Array.Clear(_visible, 0, _visible.Length);
         Array.Clear(_explored, 0, _explored.Length);
+        _hasPrev = false;
     }
 
     // ── Private ─────────────────────────────────────────────────────

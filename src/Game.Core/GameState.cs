@@ -35,7 +35,7 @@ public class GameState
     public GameMode Mode { get; set; } = GameMode.Overworld;
 
     /// <summary>The map currently being played on.</summary>
-    public TileMap? ActiveMap { get; set; }
+    public IWorldMap? ActiveMap { get; set; }
 
     /// <summary>Player entity -- always exists once the game starts.</summary>
     public Player Player { get; set; } = null!;
@@ -46,7 +46,7 @@ public class GameState
     /// <summary>
     /// Preserved overworld map so we don't regenerate it when exiting a dungeon.
     /// </summary>
-    public TileMap? OverworldMap { get; set; }
+    public IWorldMap? OverworldMap { get; set; }
 
     /// <summary>
     /// Player's position on the overworld, saved when entering a dungeon

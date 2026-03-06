@@ -22,7 +22,27 @@ public sealed class BiomeDefValidator : AbstractValidator<BiomeDef>
             .WithMessage("Biome '{PropertyValue}' must reference a TileId.");
 
         RuleFor(b => b.ElevationMax)
+            .InclusiveBetween(0f, 10f)
+            .WithMessage("Biome ElevationMax must be between 0 and 10.");
+
+        RuleFor(b => b.ElevationMin)
+            .InclusiveBetween(0f, 10f)
+            .WithMessage("Biome ElevationMin must be between 0 and 10.");
+
+        RuleFor(b => b.MoistureMin)
             .InclusiveBetween(0f, 1f)
-            .WithMessage("Biome ElevationMax must be between 0 and 1.");
+            .WithMessage("Biome MoistureMin must be between 0 and 1.");
+
+        RuleFor(b => b.MoistureMax)
+            .InclusiveBetween(0f, 1f)
+            .WithMessage("Biome MoistureMax must be between 0 and 1.");
+
+        RuleFor(b => b)
+            .Must(b => b.MoistureMin <= b.MoistureMax)
+            .WithMessage(b => $"Biome '{b.Id}' MoistureMin ({b.MoistureMin}) must be <= MoistureMax ({b.MoistureMax}).");
+
+        RuleFor(b => b)
+            .Must(b => b.ElevationMin <= b.ElevationMax)
+            .WithMessage(b => $"Biome '{b.Id}' ElevationMin ({b.ElevationMin}) must be <= ElevationMax ({b.ElevationMax}).");
     }
 }

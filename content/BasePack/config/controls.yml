@@ -47,6 +47,9 @@ wait:
 toggleInventory:
   - I
 
+toggleMinimap:
+  - M
+
 quit:
   - Escape
 

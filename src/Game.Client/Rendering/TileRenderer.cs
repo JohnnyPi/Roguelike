@@ -8,7 +8,6 @@ using Game.Core;
 using Game.Core.Map;
 using Game.Core.Tiles;
 using Game.Core.Entities;
-using Game.Core.Items;
 
 #nullable enable
 
@@ -20,11 +19,11 @@ namespace Game.Client.Rendering;
 /// follows the player.
 ///
 /// Rendering pipeline order:
-///   1. DrawTiles          -- each tile colored by: base color x light color x FOW state
-///   2. DrawHeightArrows   -- slope indicators between height-differing neighbors (zoom >= 16px)
+///   1. DrawTiles          -- each tile colored by: (base color x hillshade) x light color x FOW state
+///   2. DrawCliffEdges     -- dark face bands + shadow bands at cliff drops (baked at gen time)
 ///   3. DrawPathOverlay    -- mouse path preview (between tiles and entities)
-///   4. DrawEntities       -- only entities on currently-visible tiles
-///   5. DrawPlayer         -- always drawn (player always knows where they are)
+///   4. DrawEntities       -- only entities on currently-visible tiles  [TileRenderer.Entities.cs]
+///   5. DrawPlayer         -- always drawn (player always knows where they are)  [TileRenderer.Entities.cs]
 ///   6. DrawWeatherOverlay -- full-screen alpha tint (overworld only)
 ///
 /// Zoom:
@@ -32,16 +31,24 @@ namespace Game.Client.Rendering;
 ///   TileSize (32) remains the canonical "1x zoom" reference value used by Camera.
 ///
 /// FOW tile states:
-///   - Not explored        : solid black
+///   - Not explored          : solid black
 ///   - Explored, not visible : ~28% brightness with cool blue desaturation tint
-///   - Visible             : full color multiplied by LightMap
+///   - Visible               : base color scaled by hillshade, multiplied by LightMap
 ///
-//   Arrow pointing OUT = neighbor is HIGHER (sloping up that direction) -- detached arrowhead at face, pointing away from tile
-//   Arrow pointing IN  = neighbor is LOWER  (sloping down that direction) -- detached arrowhead at face, pointing toward tile center
-//   Nothing drawn      = same height as neighbor
-//   Only drawn on tiles within ~4 Chebyshev distance of the player
+/// Terrain shading (overworld only, baked):
+///   - Hillshade: NW sun gradient applied as a float multiplier to base tile color.
+///     Sun-facing slopes brighten; shadow slopes darken. Range ~[0.30, 1.15].
+///   - Cliff edges: dark face band + translucent shadow projected onto the low neighbor.
+///     Cliff band thickness scales with zoom. Visible at all zoom levels.
+///
+/// Chunk-aware path (overworld w/ ChunkedWorldMap):
+///   DrawTiles detects ChunkedWorldMap and iterates by chunk to reduce dictionary
+///   lookups from O(visible_tiles) to O(visible_chunks).  Unloaded chunks are
+///   rendered as dark-gray placeholder tiles so the player can see the border.
+///
+/// Entity drawing is in TileRenderer.Entities.cs (partial class).
 /// </summary>
-public class TileRenderer
+public partial class TileRenderer
 {
     /// <summary>Base tile size in pixels at 1.0x zoom.</summary>
     public const int TileSize = 32;
@@ -57,8 +64,8 @@ public class TileRenderer
     // Cache base tile colors -- avoids re-parsing hex every frame
     private readonly Dictionary<string, Color> _colorCache = new();
 
-    // Semi-transparent white used for height arrows
-    private static readonly Color ArrowColor = new Color(255, 255, 255, 140);
+    // Placeholder color drawn where chunks are not yet resident
+    private static readonly Color UnloadedChunkColor = new Color(20, 20, 20);
 
     public TileRenderer(GraphicsDevice graphicsDevice, SpriteBatch spriteBatch)
     {
@@ -93,19 +100,32 @@ public class TileRenderer
     private void DrawTiles(GameState state, Camera camera)
     {
         var map = state.ActiveMap!;
-
-        // Use zoom-aware tile size for all position/size calculations this frame
         int ts = camera.ZoomedTileSize;
-        bool showArrows = ts >= 16; // arrows unreadable below 16px per tile
 
-        // Calculate visible tile range from camera bounds (+2 tile overdraw buffer)
+        // Use the chunk-aware path when the active map is a ChunkedWorldMap.
+        // This reduces chunk dictionary lookups from O(tiles) to O(chunks).
+        if (map is ChunkedWorldMap chunked)
+        {
+            DrawTilesChunked(chunked, camera, ts);
+            return;
+        }
+
+        DrawTilesFlat(map, camera, ts);
+    }
+
+    /// <summary>
+    /// Standard flat-array draw path. Used for dungeons (TileMap).
+    /// </summary>
+    private void DrawTilesFlat(IWorldMap map, Camera camera, int ts)
+    {
+        bool hasShading = map.HasTerrainShading;
+        bool hasFow = map.Visibility != null;
+        bool hasLighting = map.Lighting != null;
+
         int startX = Math.Max(0, (int)(camera.X / ts));
         int startY = Math.Max(0, (int)(camera.Y / ts));
         int endX = Math.Min(map.Width, startX + (camera.ViewportWidth / ts) + 2);
         int endY = Math.Min(map.Height, startY + (camera.ViewportHeight / ts) + 2);
-
-        bool hasFow = map.Visibility != null;
-        bool hasLighting = map.Lighting != null;
 
         for (int y = startY; y < endY; y++)
         {
@@ -117,49 +137,164 @@ public class TileRenderer
                 int screenX = (int)(x * ts - camera.X);
                 int screenY = (int)(y * ts - camera.Y);
 
-                if (hasFow)
-                {
-                    bool visible = map.IsVisible(x, y);
-                    bool explored = map.IsExplored(x, y);
-
-                    if (!explored)
-                    {
-                        // Never seen -- draw solid black, skip border and arrows
-                        _spriteBatch.Draw(_pixel,
-                            new Rectangle(screenX, screenY, ts, ts),
-                            Color.Black);
-                        continue;
-                    }
-
-                    if (!visible)
-                    {
-                        // Remembered but in darkness -- dim + cool blue desaturation
-                        var dimColor = DimColor(GetCachedColor(tile), 0.28f);
-                        _spriteBatch.Draw(_pixel,
-                            new Rectangle(screenX, screenY, ts, ts),
-                            dimColor);
-                        // No border or arrows on dim tiles -- keeps them visually subordinate
-                        continue;
-                    }
-                }
-
-                // Fully visible tile -- apply lighting
-                var baseColor = GetCachedColor(tile);
-                var drawColor = hasLighting
-                    ? MultiplyColors(baseColor, map.Lighting!.GetLight(x, y))
-                    : baseColor;
-
-                _spriteBatch.Draw(_pixel,
-                    new Rectangle(screenX, screenY, ts, ts),
-                    drawColor);
-
-                DrawTileBorder(screenX, screenY, ts, drawColor);
-
-                // Height arrows -- only when zoomed in enough to be readable
-                if (showArrows && IsNearPlayer(state, x, y, 4))
-                    DrawHeightArrows(map, x, y, screenX, screenY, ts);
+                DrawSingleTile(map, tile, x, y, screenX, screenY, ts,
+                               hasFow, hasShading, hasLighting);
             }
         }
+    }
+
+    /// <summary>
+    /// Chunk-aware draw path. Used for the overworld (ChunkedWorldMap).
+    ///
+    /// Outer loop: visible chunk range -- O(visible_chunks) manager lookups.
+    /// Inner loop: visible cells within each chunk -- direct array access.
+    ///
+    /// Unloaded chunks render as a dark-gray solid (no tile lookup needed).
+    /// </summary>
+    private void DrawTilesChunked(ChunkedWorldMap map, Camera camera, int ts)
+    {
+        bool hasShading = map.HasTerrainShading;
+        bool hasFow = map.Visibility != null;
+        bool hasLighting = map.Lighting != null;
+
+        int cs = WorldChunk.Size;
+
+        // Visible tile range (with overdraw buffer)
+        int startTX = Math.Max(0, (int)(camera.X / ts));
+        int startTY = Math.Max(0, (int)(camera.Y / ts));
+        int endTX = Math.Min(map.Width, startTX + (camera.ViewportWidth / ts) + 2);
+        int endTY = Math.Min(map.Height, startTY + (camera.ViewportHeight / ts) + 2);
+
+        // Convert to chunk range
+        int startCX = startTX / cs;
+        int startCY = startTY / cs;
+        int endCX = Math.Min(map.Width / cs, endTX / cs + 1);
+        int endCY = Math.Min(map.Height / cs, endTY / cs + 1);
+
+        for (int cy = startCY; cy < endCY; cy++)
+        {
+            for (int cx = startCX; cx < endCX; cx++)
+            {
+                var chunk = map.ChunkManager.GetChunk(cx, cy);
+
+                // Chunk origin in world tile coords
+                int originX = cx * cs;
+                int originY = cy * cs;
+
+                if (chunk == null)
+                {
+                    // Chunk not resident -- draw placeholder rectangle for the
+                    // visible portion of this chunk
+                    int px0 = Math.Max(startTX, originX);
+                    int py0 = Math.Max(startTY, originY);
+                    int px1 = Math.Min(endTX, originX + cs);
+                    int py1 = Math.Min(endTY, originY + cs);
+
+                    int rx = (int)(px0 * ts - camera.X);
+                    int ry = (int)(py0 * ts - camera.Y);
+                    int rw = (px1 - px0) * ts;
+                    int rh = (py1 - py0) * ts;
+
+                    if (rw > 0 && rh > 0)
+                        _spriteBatch.Draw(_pixel, new Rectangle(rx, ry, rw, rh),
+                                          UnloadedChunkColor);
+                    continue;
+                }
+
+                // Clamp inner tile range to visible viewport
+                int lxStart = Math.Max(0, startTX - originX);
+                int lyStart = Math.Max(0, startTY - originY);
+                int lxEnd = Math.Min(cs, endTX - originX);
+                int lyEnd = Math.Min(cs, endTY - originY);
+
+                // Grab TileIds array directly -- avoids Resolve()->GetChunk()->dict per tile.
+                var tileIds = chunk.TileIds;
+
+                for (int ly = lyStart; ly < lyEnd; ly++)
+                {
+                    for (int lx = lxStart; lx < lxEnd; lx++)
+                    {
+                        int wx = originX + lx;
+                        int wy = originY + ly;
+
+                        // Check dynamic overlay first (sparse -- only set for player-modified tiles)
+                        string? tileId;
+                        if (chunk.DynamicOverlay != null &&
+                            chunk.DynamicOverlay.TryGetValue(ly * cs + lx, out var dynId))
+                            tileId = dynId;
+                        else
+                            tileId = tileIds[ly * cs + lx];
+
+                        if (tileId == null) continue;
+                        var tile = map.LookupTileDef(tileId);
+                        if (tile == null) continue;
+
+                        int screenX = (int)(wx * ts - camera.X);
+                        int screenY = (int)(wy * ts - camera.Y);
+
+                        DrawSingleTile(map, tile, wx, wy, screenX, screenY, ts,
+                                       hasFow, hasShading, hasLighting);
+                    }
+                }
+            }
+        }
+    }
+
+    /// <summary>
+    /// Draw one tile at the given screen position, applying FOW, hillshade, and lighting.
+    /// Shared by both the flat and chunk-aware paths.
+    /// </summary>
+    private void DrawSingleTile(IWorldMap map, TileDef tile,
+                                 int wx, int wy, int screenX, int screenY, int ts,
+                                 bool hasFow, bool hasShading, bool hasLighting)
+    {
+        if (hasFow)
+        {
+            bool visible = map.IsVisible(wx, wy);
+            bool explored = map.IsExplored(wx, wy);
+
+            if (!explored)
+            {
+                _spriteBatch.Draw(_pixel,
+                    new Rectangle(screenX, screenY, ts, ts),
+                    Color.Black);
+                return;
+            }
+
+            if (!visible)
+            {
+                var dimColor = DimColor(GetCachedColor(tile), 0.28f);
+                _spriteBatch.Draw(_pixel,
+                    new Rectangle(screenX, screenY, ts, ts),
+                    dimColor);
+                return;
+            }
+        }
+
+        // Fully visible -- apply hillshade then lighting
+        var baseColor = GetCachedColor(tile);
+
+        if (hasShading)
+        {
+            float shade = map.GetShade(wx, wy);
+            baseColor = ScaleColor(baseColor, shade);
+        }
+
+        var drawColor = hasLighting
+            ? MultiplyColors(baseColor, map.Lighting!.GetLight(wx, wy))
+            : baseColor;
+
+        _spriteBatch.Draw(_pixel,
+            new Rectangle(screenX, screenY, ts, ts),
+            drawColor);
+
+        // Border lines are only visible at higher zoom levels -- skip them at smaller
+        // tile sizes to avoid burning 2 extra SpriteBatch.Draw calls per tile.
+        if (ts >= 20)
+            DrawTileBorder(screenX, screenY, ts, drawColor);
+
+        if (hasShading)
+            DrawCliffEdges(map, wx, wy, screenX, screenY, ts);
     }
 
     private void DrawTileBorder(int screenX, int screenY, int ts, Color tileColor)
@@ -175,7 +310,77 @@ public class TileRenderer
         _spriteBatch.Draw(_pixel, new Rectangle(screenX, screenY, 1, ts), borderColor);
     }
 
-    // -- Height arrow rendering ---------------------------------------
+    // -- Terrain shading rendering ------------------------------------
+
+    /// <summary>
+    /// Draws dark edge bands on the high side of cliff transitions.
+    ///
+    /// For each cardinal edge flagged as a cliff on this tile:
+    ///   - Draw a thick dark band (4px at 32px zoom, scaled) along that edge.
+    ///     This represents the cliff face visible from above.
+    ///   - Draw a thinner, lighter shadow band just INSIDE the neighbor tile
+    ///     on the low side (cast shadow). The low neighbor draws its own band
+    ///     when it is processed in the main loop so no double-dispatch needed.
+    ///
+    /// Band thickness scales with tile size so it looks consistent at all zooms.
+    /// Accepts IWorldMap so it works with both TileMap and ChunkedWorldMap.
+    /// </summary>
+    private void DrawCliffEdges(IWorldMap map, int tx, int ty,
+                                int screenX, int screenY, int ts)
+    {
+        var edges = map.GetCliffEdges(tx, ty);
+        if (edges == TileMap.CliffEdge.None) return;
+
+        var cliffColor = new Color(25, 18, 12, 230);
+        var shadowColor = new Color(0, 0, 0, 90);
+
+        int faceThick = Math.Clamp(ts / 8, 2, 8);
+        int shadowThick = Math.Clamp(ts / 14, 1, 5);
+
+        if ((edges & TileMap.CliffEdge.North) != 0)
+        {
+            _spriteBatch.Draw(_pixel,
+                new Rectangle(screenX, screenY, ts, faceThick),
+                cliffColor);
+            _spriteBatch.Draw(_pixel,
+                new Rectangle(screenX, screenY - shadowThick, ts, shadowThick),
+                shadowColor);
+        }
+
+        if ((edges & TileMap.CliffEdge.South) != 0)
+        {
+            _spriteBatch.Draw(_pixel,
+                new Rectangle(screenX, screenY + ts - faceThick, ts, faceThick),
+                cliffColor);
+            _spriteBatch.Draw(_pixel,
+                new Rectangle(screenX, screenY + ts, ts, shadowThick),
+                shadowColor);
+        }
+
+        if ((edges & TileMap.CliffEdge.East) != 0)
+        {
+            _spriteBatch.Draw(_pixel,
+                new Rectangle(screenX + ts - faceThick, screenY, faceThick, ts),
+                cliffColor);
+            _spriteBatch.Draw(_pixel,
+                new Rectangle(screenX + ts, screenY, shadowThick, ts),
+                shadowColor);
+        }
+
+        if ((edges & TileMap.CliffEdge.West) != 0)
+        {
+            _spriteBatch.Draw(_pixel,
+                new Rectangle(screenX, screenY, faceThick, ts),
+                cliffColor);
+            _spriteBatch.Draw(_pixel,
+                new Rectangle(screenX - shadowThick, screenY, shadowThick, ts),
+                shadowColor);
+        }
+    }
+
+    // -- Height arrow rendering (removed) -----------------------------
+    // Replaced by baked hillshade + DrawCliffEdges.
+    // IsNearPlayer kept below for future use (e.g. enemy AI range checks).
 
     /// <summary>
     /// Returns true if tile (tx,ty) is within <radius> tiles of the player (Chebyshev distance).
@@ -185,214 +390,6 @@ public class TileRenderer
         var p = state.Player;
         if (p == null) return false;
         return Math.Abs(tx - p.X) <= radius && Math.Abs(ty - p.Y) <= radius;
-    }
-
-    /// <summary>
-    /// Draws detached arrowhead slope indicators near each face of a tile.
-    ///
-    /// Sloping UP toward neighbor   -> arrowhead points OUTWARD (away from tile center)
-    /// Sloping DOWN toward neighbor -> arrowhead points INWARD  (toward tile center)
-    /// Same height                  -> nothing drawn
-    ///
-    /// Arrows are drawn as a detached "V" near the tile edge -- no shaft from center.
-    /// Only called for tiles near the player and when ts >= 16.
-    /// </summary>
-    private void DrawHeightArrows(TileMap map, int tx, int ty,
-                                  int screenX, int screenY, int ts)
-    {
-        int myH = map.GetTileHeight(tx, ty);
-
-        int tipLen = Math.Max(2, ts / 7);   // arm length of the V
-        int margin = Math.Max(3, ts / 6);   // distance from tile edge to arrowhead tip
-        int cx = screenX + ts / 2;
-        int cy = screenY + ts / 2;
-
-        // North face
-        DrawDetachedArrow(cx, screenY + margin,
-                          myH, map.GetTileHeight(tx, ty - 1),
-                          tipLen, dx: 1, dy: 0, outDy: -1, outDx: 0);
-        // South face
-        DrawDetachedArrow(cx, screenY + ts - margin,
-                          myH, map.GetTileHeight(tx, ty + 1),
-                          tipLen, dx: 1, dy: 0, outDy: 1, outDx: 0);
-        // West face
-        DrawDetachedArrow(screenX + margin, cy,
-                          myH, map.GetTileHeight(tx - 1, ty),
-                          tipLen, dx: 0, dy: 1, outDy: 0, outDx: -1);
-        // East face
-        DrawDetachedArrow(screenX + ts - margin, cy,
-                          myH, map.GetTileHeight(tx + 1, ty),
-                          tipLen, dx: 0, dy: 1, outDy: 0, outDx: 1);
-    }
-
-    /// <summary>
-    /// Draws a single detached arrowhead at position (ax, ay) facing inward or outward.
-    ///
-    /// Parameters:
-    ///   ax, ay      -- position of the arrowhead tip
-    ///   myH         -- height of the current tile
-    ///   neighborH   -- height of the neighbor tile on this face
-    ///   tipLen      -- half-width of the V arms
-    ///   dx, dy      -- unit vector ALONG the face edge (perpendicular to outward normal)
-    ///   outDx, outDy -- unit vector pointing OUTWARD from tile (toward the neighbor)
-    ///
-    /// Sloping UP   (neighborH > myH): tip points outward, arms point inward
-    /// Sloping DOWN (neighborH < myH): tip points inward,  arms point outward
-    /// </summary>
-    private void DrawDetachedArrow(int ax, int ay,
-                                   int myH, int neighborH, int tipLen,
-                                   int dx, int dy, int outDx, int outDy)
-    {
-        if (neighborH == myH) return; // flat -- nothing to draw
-
-        bool slopingUp = neighborH > myH;
-
-        // For OUTWARD arrow (sloping up): tip is the outermost point, arms go back inward
-        // For INWARD arrow (sloping down): tip is inward, arms spread outward at the edge
-        int armDir = slopingUp ? -1 : 1; // arms go opposite to outDx/outDy from tip
-        int armOffset = tipLen;           // how far arms spread along the face axis
-
-        // Arm base: step back from tip along the outward axis
-        int bx = ax + outDx * armDir * tipLen;
-        int by = ay + outDy * armDir * tipLen;
-
-        // Left arm and right arm spread perpendicular to the outward direction
-        DrawLine(ax, ay, bx - dx * armOffset, by - dy * armOffset, ArrowColor);
-        DrawLine(ax, ay, bx + dx * armOffset, by + dy * armOffset, ArrowColor);
-    }
-
-    /// <summary>
-    /// Draw a 1px aliased line by walking the longer axis one step at a time.
-    /// </summary>
-    private void DrawLine(int x1, int y1, int x2, int y2, Color color)
-    {
-        int dx = x2 - x1;
-        int dy = y2 - y1;
-        int steps = Math.Max(Math.Abs(dx), Math.Abs(dy));
-
-        if (steps == 0)
-        {
-            _spriteBatch.Draw(_pixel, new Rectangle(x1, y1, 1, 1), color);
-            return;
-        }
-
-        float sx = dx / (float)steps;
-        float sy = dy / (float)steps;
-
-        for (int i = 0; i <= steps; i++)
-            _spriteBatch.Draw(_pixel,
-                new Rectangle((int)(x1 + sx * i), (int)(y1 + sy * i), 1, 1),
-                color);
-    }
-
-    // -- Entity drawing -----------------------------------------------
-
-    private void DrawEntities(GameState state, Camera camera)
-    {
-        var map = state.ActiveMap!;
-        int ts = camera.ZoomedTileSize;
-
-        foreach (var entity in state.Entities)
-        {
-            if (!entity.IsAlive) continue;
-
-            // Only draw entities on currently-visible tiles
-            if (map.Visibility != null && !map.IsVisible(entity.X, entity.Y))
-                continue;
-
-            int screenX = (int)(entity.X * ts - camera.X);
-            int screenY = (int)(entity.Y * ts - camera.Y);
-
-            if (entity is WorldItem worldItem)
-                DrawWorldItem(screenX, screenY, ts, worldItem);
-            else if (entity is Chest chest)
-                DrawChest(screenX, screenY, ts, chest);
-            else if (entity is Enemy enemy)
-                DrawEnemy(screenX, screenY, ts, enemy);
-            else
-            {
-                // Generic entity fallback: red square
-                int inset = Math.Max(1, ts / 8);
-                _spriteBatch.Draw(_pixel,
-                    new Rectangle(screenX + inset, screenY + inset,
-                                  ts - inset * 2, ts - inset * 2),
-                    Color.Red);
-            }
-        }
-    }
-
-    /// <summary>Draw an enemy as a colored square with a small HP bar.</summary>
-    private void DrawEnemy(int screenX, int screenY, int ts, Enemy enemy)
-    {
-        var color = GetEnemyColor(enemy);
-        int inset = Math.Max(1, ts / 8);
-
-        _spriteBatch.Draw(_pixel,
-            new Rectangle(screenX + inset, screenY + inset,
-                          ts - inset * 2, ts - inset * 2),
-            color);
-
-        var darkerColor = new Color(
-            (int)(color.R * 0.6f),
-            (int)(color.G * 0.6f),
-            (int)(color.B * 0.6f)
-        );
-        int innerInset = Math.Max(2, ts / 4);
-        _spriteBatch.Draw(_pixel,
-            new Rectangle(screenX + innerInset, screenY + innerInset,
-                          ts - innerInset * 2, ts - innerInset * 2),
-            darkerColor);
-
-        // HP bar (only if damaged)
-        if (enemy.Hp < enemy.MaxHp)
-        {
-            int barWidth = ts - inset * 2;
-            int barHeight = Math.Max(2, ts / 10);
-            int barY = screenY + ts - inset - barHeight;
-            int barX = screenX + inset;
-
-            _spriteBatch.Draw(_pixel,
-                new Rectangle(barX, barY, barWidth, barHeight),
-                new Color(40, 40, 40));
-
-            float hpPct = (float)enemy.Hp / enemy.MaxHp;
-            int fillWidth = Math.Max(1, (int)(barWidth * hpPct));
-            var hpColor = hpPct > 0.5f ? new Color(50, 200, 50) : new Color(220, 50, 50);
-            _spriteBatch.Draw(_pixel,
-                new Rectangle(barX, barY, fillWidth, barHeight),
-                hpColor);
-        }
-    }
-
-    private void DrawWorldItem(int screenX, int screenY, int ts, WorldItem item)
-    {
-        var color = GetItemColor(item.ItemDef);
-        int size = Math.Max(4, ts / 3);
-        int offset = (ts - size) / 2;
-
-        _spriteBatch.Draw(_pixel,
-            new Rectangle(screenX + offset, screenY + offset, size, size),
-            color);
-    }
-
-    private void DrawChest(int screenX, int screenY, int ts, Chest chest)
-    {
-        int inset = Math.Max(2, ts / 6);
-        var color = chest.IsOpen ? new Color(80, 70, 60) : new Color(180, 130, 50);
-        int lidH = Math.Max(2, ts / 8);
-
-        // Body
-        _spriteBatch.Draw(_pixel,
-            new Rectangle(screenX + inset, screenY + inset + lidH,
-                          ts - inset * 2, ts - inset * 2 - lidH),
-            color);
-
-        // Lid
-        var lidColor = chest.IsOpen ? new Color(60, 55, 45) : new Color(200, 150, 60);
-        _spriteBatch.Draw(_pixel,
-            new Rectangle(screenX + inset - 1, screenY + inset,
-                          ts - inset * 2 + 2, lidH),
-            lidColor);
     }
 
     // -- Path overlay -------------------------------------------------
@@ -431,30 +428,6 @@ public class TileRenderer
         }
     }
 
-    // -- Player drawing -----------------------------------------------
-
-    private void DrawPlayer(GameState state, Camera camera)
-    {
-        var player = state.Player;
-        if (player == null || player.IsDead) return;
-
-        int ts = camera.ZoomedTileSize;
-        int screenX = (int)(player.X * ts - camera.X);
-        int screenY = (int)(player.Y * ts - camera.Y);
-
-        int inset = Math.Max(1, ts / 10);
-        _spriteBatch.Draw(_pixel,
-            new Rectangle(screenX + inset, screenY + inset,
-                          ts - inset * 2, ts - inset * 2),
-            Color.Cyan);
-
-        int innerInset = Math.Max(2, ts / 4);
-        _spriteBatch.Draw(_pixel,
-            new Rectangle(screenX + innerInset, screenY + innerInset,
-                          ts - innerInset * 2, ts - innerInset * 2),
-            Color.White);
-    }
-
     // -- Weather overlay ----------------------------------------------
 
     /// <summary>
@@ -466,7 +439,7 @@ public class TileRenderer
         if (state.Mode != GameMode.Overworld) return;
 
         var tint = state.Weather.OverlayTint;
-        if (tint.A == 0) return; // clear weather -- nothing to draw
+        if (tint.A == 0) return;
 
         _spriteBatch.Draw(_pixel,
             new Rectangle(0, 0, camera.ViewportWidth, camera.ViewportHeight),
@@ -485,27 +458,6 @@ public class TileRenderer
         return color;
     }
 
-    private Color GetEnemyColor(Enemy enemy)
-    {
-        var key = $"enemy:{enemy.Def.Id}";
-        if (_colorCache.TryGetValue(key, out var cached))
-            return cached;
-
-        var color = ParseHexColor(enemy.Def.Color);
-        _colorCache[key] = color;
-        return color;
-    }
-
-    private Color GetItemColor(ItemDef def)
-    {
-        if (_colorCache.TryGetValue(def.Id, out var cached))
-            return cached;
-
-        var color = ParseHexColor(def.Color);
-        _colorCache[def.Id] = color;
-        return color;
-    }
-
     /// <summary>
     /// Multiply two colors channel-by-channel (normalized [0,1]).
     /// Used to apply the LightMap color to a tile's base color.
@@ -517,6 +469,22 @@ public class TileRenderer
             (int)(a.G * b.G / 255),
             (int)(a.B * b.B / 255),
             255
+        );
+    }
+
+    /// <summary>
+    /// Scale a color's RGB channels by a float factor.
+    /// Used to apply the baked hillshade factor to a tile's base color.
+    /// Factor > 1.0 brightens (sun-facing slopes), < 1.0 darkens (shadow slopes).
+    /// Alpha is preserved.
+    /// </summary>
+    private static Color ScaleColor(Color c, float factor)
+    {
+        return new Color(
+            Math.Clamp((int)(c.R * factor), 0, 255),
+            Math.Clamp((int)(c.G * factor), 0, 255),
+            Math.Clamp((int)(c.B * factor), 0, 255),
+            c.A
         );
     }
 

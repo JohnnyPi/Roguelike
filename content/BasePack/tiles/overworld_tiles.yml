@@ -1,0 +1,144 @@
+﻿# content/BasePack/tiles/overworld_tiles.yml
+#
+# Overworld-specific tile definitions for the two-axis biome system.
+# These complement the base tiles in base_tiles.yml (grass, dirt, wall, water, beach).
+#
+# Height guide (matches TileDef.Height):
+#   0 = water / sea level
+#   1 = lowland (beach, flat ground, jungle floor)
+#   2 = midland (forest, savanna, scrub)
+#   3 = highland (hills, cloud forest, volcanic rock)
+#   4 = peak (impassable crags, moss-covered summits)
+#
+# Color intent:
+#   Dry/arid biomes  -> warm yellows, tans, oranges
+#   Wet/tropical     -> deep saturated greens, blue-greens
+#   Highland         -> cooler greens, greys, purples
+#   Volcanic         -> dark charcoal, rust reds
+
+schema: tile_defs.v1
+tiles:
+
+  # ── Shoreline ────────────────────────────────────────────────────────
+  - id: base:rocky_cliff
+    name: "Rocky Cliffs"
+    walkable: false
+    color: "#5C4A3A"
+    sprite: ""
+    blocksSight: true
+    height: 2
+    tags: [natural, overworld, coastal, cliff, impassable]
+
+  - id: base:mangrove
+    name: "Mangrove Coast"
+    walkable: false
+    color: "#2D6B4A"
+    sprite: ""
+    blocksSight: true
+    height: 1
+    tags: [natural, overworld, coastal, wet, vegetation, dense]
+
+  # ── Low Land ─────────────────────────────────────────────────────────
+  - id: base:savanna
+    name: "Savanna"
+    walkable: true
+    color: "#B5A044"
+    sprite: ""
+    blocksSight: false
+    height: 1
+    tags: [natural, overworld, lowland, temperate]
+
+  - id: base:jungle_floor
+    name: "Tropical Lowland"
+    walkable: true
+    color: "#2E7A34"
+    sprite: ""
+    blocksSight: false
+    height: 1
+    tags: [natural, overworld, lowland, tropical, wet]
+
+  # ── Mid Land ─────────────────────────────────────────────────────────
+  - id: base:dry_forest
+    name: "Dry Forest"
+    walkable: true
+    color: "#6B8C3A"
+    sprite: ""
+    blocksSight: false
+    height: 2
+    tags: [natural, overworld, midland, forest, temperate]
+
+  - id: base:rainforest
+    name: "Rainforest"
+    walkable: true
+    color: "#1A5E28"
+    sprite: ""
+    blocksSight: false
+    height: 2
+    tags: [natural, overworld, midland, forest, tropical, wet, dense]
+
+  # ── Highland ─────────────────────────────────────────────────────────
+  - id: base:volcanic_rock
+    name: "Volcanic Rock"
+    walkable: true
+    color: "#3D2B1F"
+    sprite: ""
+    blocksSight: false
+    height: 3
+    tags: [natural, overworld, highland, volcanic, arid]
+
+  - id: base:cloud_forest
+    name: "Cloud Forest"
+    walkable: true
+    color: "#3B7A52"
+    sprite: ""
+    blocksSight: false
+    height: 3
+    tags: [natural, overworld, highland, forest, tropical, wet, dense]
+
+  # ── Peaks ─────────────────────────────────────────────────────────────
+  - id: base:mossy_rock
+    name: "Mossy Peaks"
+    walkable: false
+    color: "#4A5E3A"
+    sprite: ""
+    blocksSight: true
+    height: 4
+    tags: [natural, overworld, peak, impassable, wet]
+
+  # ── Volcano ────────────────────────────────────────────────────────────
+  - id: base:volcanic_peak
+    name: "Volcanic Peak"
+    walkable: false
+    color: "#1A1008"
+    sprite: ""
+    blocksSight: true
+    height: 4
+    tags: [natural, overworld, peak, impassable, volcanic]
+
+  - id: base:lava
+    name: "Lava Flow"
+    walkable: false
+    color: "#CC3300"
+    sprite: ""
+    blocksSight: false
+    height: 2
+    tags: [natural, overworld, volcanic, lava, dangerous]
+
+  - id: base:crater_lake
+    name: "Crater Lake"
+    walkable: false
+    color: "#1A4466"
+    sprite: ""
+    blocksSight: false
+    height: 3
+    tags: [natural, overworld, volcanic, liquid, crater]
+
+# ── Rivers ────────────────────────────────────────────────────────────
+  - id: base:river
+    name: "River"
+    walkable: false
+    color: "#3A8FC0"
+    sprite: ""
+    blocksSight: false
+    height: 0
+    tags: [natural, overworld, liquid, river]

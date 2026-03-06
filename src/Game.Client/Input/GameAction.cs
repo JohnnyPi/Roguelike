@@ -33,6 +33,7 @@ public enum GameAction
 
     // ── UI toggles ────────────────────────────────────────────────
     ToggleInventory,
+    ToggleMinimap,
 
     // ── Meta / debug ─────────────────────────────────────────────
     Quit,

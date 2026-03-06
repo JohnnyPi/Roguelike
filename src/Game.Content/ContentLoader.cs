@@ -292,7 +292,10 @@ public sealed class ContentLoader
                         Id = yb.Id,
                         Name = yb.Name,
                         TileId = yb.TileId,
+                        ElevationMin = yb.ElevationMin,
                         ElevationMax = yb.ElevationMax,
+                        MoistureMin = yb.MoistureMin,
+                        MoistureMax = yb.MoistureMax,
                         Walkable = yb.Walkable,
                         Tags = yb.Tags
                     };
